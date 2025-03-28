@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Warehouse Management</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css">
+    <style>
+        .navbar { margin-bottom: 20px; }
+        .section-content { padding: 20px; border-radius: 5px; background: #f8f9fa; }
+        .admin-only { border-left: 3px solid #dc3545; padding-left: 15px; }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+        <div class="container">
+            <a class="navbar-brand" href="#">Warehouse Manager</a>
+            <div class="navbar-nav">
+                <a class="nav-link {{ 'active' if section == 'products' }}"
+                   href="{{ url_for('index', section='products') }}">Products</a>
+                <a class="nav-link {{ 'active' if section == 'tasks' }}"
+                   href="{{ url_for('index', section='tasks') }}">Tasks</a>
+                {% if current_user.is_admin %}
+                <a class="nav-link {{ 'active' if section == 'settings' }}"
+                   href="{{ url_for('warehouse_settings') }}">Settings</a>
+                {% endif %}
+            </div>
+            <div class="navbar-nav ms-auto">
+                <span class="navbar-text me-3">{{ current_user.username }}</span>
+                <a class="btn btn-outline-light" href="{{ url_for('logout') }}">Logout</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container">
+        {% with messages = get_flashed_messages() %}
+            {% if messages %}
+                {% for message in messages %}
+                    <div class="alert alert-info">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        {% block content %}{% endblock %}
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+</html>

@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container mt-5">
+    <div class="row justify-content-center">
+        <div class="col-md-8 col-lg-6">
+            <div class="card shadow">
+                <div class="card-header bg-primary text-white">
+                    <h3 class="mb-0">Create New Account</h3>
+                </div>
+                <div class="card-body">
+                    <form method="POST" id="registerForm">
+                        {{ form.hidden_tag() }}
+
+                        <!-- Username Field -->
+                        <div class="mb-4">
+                            <label for="username" class="form-label">Username</label>
+                            {{ form.username(class="form-control form-control-lg", placeholder="Enter your username") }}
+                            {% for error in form.username.errors %}
+                                <div class="invalid-feedback d-block">{{ error }}</div>
+                            {% endfor %}
+                        </div>
+
+                        <!-- Email Field -->
+                        <div class="mb-4">
+                            <label for="email" class="form-label">Email Address</label>
+                            {{ form.email(class="form-control form-control-lg", placeholder="example@domain.com") }}
+                            {% for error in form.email.errors %}
+                                <div class="invalid-feedback d-block">{{ error }}</div>
+                            {% endfor %}
+                        </div>
+
+                        <!-- Password Field -->
+                        <div class="mb-4">
+                            <label for="password" class="form-label">Password</label>
+                            <div class="input-group">
+                                {{ form.password(class="form-control form-control-lg",
+                                    placeholder="Create password",
+                                    id="passwordInput",
+                                    **{"aria-describedby":"passwordToggle"}) }}
+                                <button class="btn btn-outline-secondary" type="button" id="passwordToggle">
+                                    <i class="bi bi-eye-slash"></i>
+                                </button>
+                            </div>
+                            <div class="form-text mt-2">
+                                <ul class="list-unstyled" id="passwordRules">
+                                    <li data-rule="length" class="text-danger">
+                                        <i class="bi bi-x-circle"></i> 8-128 characters
+                                    </li>
+                                    <li data-rule="uppercase" class="text-danger">
+                                        <i class="bi bi-x-circle"></i> At least one uppercase
+                                    </li>
+                                    <li data-rule="lowercase" class="text-danger">
+                                        <i class="bi bi-x-circle"></i> At least one lowercase
+                                    </li>
+                                    <li data-rule="digit" class="text-danger">
+                                        <i class="bi bi-x-circle"></i> At least one digit
+                                    </li>
+                                    <li data-rule="chars" class="text-danger">
+                                        <i class="bi bi-x-circle"></i> Allowed symbols: ~!?@#$%^&*_-+()[]{}&lt;&gt;
+                                    </li>
+                                </ul>
+                            </div>
+                        </div>
+
+                        <!-- Confirm Password Field -->
+                        <div class="mb-4">
+                            <label for="password2" class="form-label">Confirm Password</label>
+                            {{ form.password2(class="form-control form-control-lg",
+                                placeholder="Repeat password",
+                                id="passwordConfirm") }}
+                            <div id="passwordMatch" class="form-text"></div>
+                        </div>
+
+                        <button type="submit" class="btn btn-primary btn-lg w-100">
+                            Create Account
+                        </button>
+                    </form>
+                </div>
+                <div class="card-footer text-center">
+                    Already have an account?
+                    <a href="{{ url_for('login') }}" class="text-decoration-none">Login here</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Password Validation Script -->
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const passwordInput = document.getElementById('passwordInput');
+    const passwordConfirm = document.getElementById('passwordConfirm');
+    const passwordToggle = document.getElementById('passwordToggle');
+    const rules = document.getElementById('passwordRules');
+
+    // Toggle password visibility
+    passwordToggle.addEventListener('click', () => {
+        const type = passwordInput.getAttribute('type') === 'password' ? 'text' : 'password';
+        passwordInput.setAttribute('type', type);
+        passwordToggle.querySelector('i').classList.toggle('bi-eye');
+        passwordToggle.querySelector('i').classList.toggle('bi-eye-slash');
+    });
+
+    // Real-time password validation
+    function validatePassword(password) {
+    return {
+        length: password.length >= 8 && password.length <= 128,
+        uppercase: /[A-Z]/.test(password),
+        lowercase: /[a-z]/.test(password),
+        digit: /\d/.test(password),
+        chars: /^[A-Za-z0-9~!?@#$%^&*_\-+()\[\]{}><]+$/.test(password),
+        hasSpecial: /[~!?@#$%^&*_\-+()\[\]{}><]/.test(password) // Новая проверка
+    };
+    }
+
+    // Update password rules display
+    function updateRules(password) {
+    const validation = validatePassword(password);
+    Object.entries(validation).forEach(([rule, valid]) => {
+        const li = rules.querySelector(`[data-rule="${rule}"]`);
+        if(rule === 'hasSpecial') { // Особое условие для специальных символов
+            li.className = valid ? 'text-success' : 'text-warning';
+            li.querySelector('i').className = valid
+                ? 'bi bi-check-circle'
+                : 'bi bi-exclamation-triangle';
+        } else {
+            li.className = valid ? 'text-success' : 'text-danger';
+            li.querySelector('i').className = valid
+                ? 'bi bi-check-circle'
+                : 'bi bi-x-circle';
+        }
+    });
+    }
+
+    // Check password match
+    function checkMatch() {
+        const match = passwordInput.value === passwordConfirm.value;
+        const matchText = document.getElementById('passwordMatch');
+        matchText.textContent = match ? 'Passwords match!' : 'Passwords do not match!';
+        matchText.className = match ? 'form-text text-success' : 'form-text text-danger';
+    }
+
+    // Event listeners
+    passwordInput.addEventListener('input', (e) => {
+        updateRules(e.target.value);
+        if(passwordConfirm.value) checkMatch();
+    });
+
+    passwordConfirm.addEventListener('input', checkMatch);
+});
+</script>
+
+<style>
+    .card {
+        border-radius: 15px;
+    }
+    .form-control-lg {
+        border-radius: 8px;
+    }
+    #passwordRules li {
+        transition: all 0.3s ease;
+    }
+    #passwordToggle {
+        border-radius: 0 8px 8px 0;
+    }
+</style>
+{% endblock %}

@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="section-content">
+    {% if not current_user.is_authenticated %}
+        <script>
+            window.location.href = "{{ url_for('login') }}";
+        </script>
+    {% endif %}
+    
+    {% if section == 'products' %}
+        <h2>Product Inventory</h2>
+        <!-- Контент для продуктов -->
+    
+    {% elif section == 'tasks' %}
+        <h2>Warehouse Tasks</h2>
+        <!-- Контент для задач -->
+    
+    {% endif %}
+</div>
+{% endblock %}
