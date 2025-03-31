@@ -9,9 +9,32 @@
     {% endif %}
     
     {% if section == 'products' %}
-        <h2>Product Inventory</h2>
-        <!-- Контент для продуктов -->
-    
+    <h2>Product Inventory</h2>
+    <div class="product-grid">
+    {% if products %}
+        {% for product in products %}
+            <div class="product-card">
+                {% if product.photo_url %}
+                    <img src="{{ product.photo_url }}"
+                         alt="{{ product.name }}"
+                         onerror="this.style.display='none'">
+                {% endif %}
+                <div class="product-info">
+                    <h3>{{ product.name }}</h3>
+                    <div class="price">{{ "%.2f"|format(product.price) }} ₽</div>
+                    {% if product.weight %}
+                        <div class="weight">{{ product.weight }}</div>
+                    {% endif %}
+                </div>
+            </div>
+        {% endfor %}
+    {% else %}
+        <div class="no-products">
+            <i class="fa fa-box-open"></i>
+            <p>No products available</p>
+        </div>
+    {% endif %}
+    </div>
     {% elif section == 'tasks' %}
         <h2>Warehouse Tasks</h2>
         <!-- Контент для задач -->
