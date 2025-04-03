@@ -8,3 +8,5 @@ class Config:
 
     KAFKA_BOOTSTRAP_SERVERS = 'localhost:29092'  # используйте 'localhost:9092' или если WI в Docker 'host.docker.internal:9092'
     KAFKA_PRODUCT_TOPIC = 'products'
+    KAFKA_STOCK_TOPIC = 'warehouse_stock_updates'
+    KAFKA_INVOICE_TOPIC = 'invoice_requests'

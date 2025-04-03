@@ -5,11 +5,13 @@ from flask import Flask, render_template, redirect, url_for, request, flash
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from kafka.errors import KafkaError, NoBrokersAvailable
 
+from config import Config
+
 from forms import LoginForm, RegistrationForm, WarehouseSettingsForm
 from database import db
 from models import User
 from flask_migrate import Migrate
-from kafka import KafkaConsumer
+from kafka import KafkaConsumer, KafkaProducer
 import json
 import threading
 
@@ -19,6 +21,9 @@ app.config.from_object('config.Config')
 #kafka
 products_cache = []
 products_cache_lock = threading.Lock()  # Добавляем блокировку
+warehouse_stock = defaultdict(dict)
+stock_lock = threading.Lock()
+
 
 # Инициализация расширений
 db.init_app(app)
@@ -33,6 +38,29 @@ warehouse = {
     'tasks': [],
     'auto_balance_params': {'threshold': 100, 'interval': 60}
 }
+
+def wh_formatter(wh_id):
+    """Форматирует WH ID в читаемый вид"""
+    if not wh_id or len(wh_id) != 24:
+        return wh_id
+    try:
+        # Пример: WHAAAAAARUS060ru00000002 -> WH-AAAA-AA-RUS-060-RU-0000-0002
+        parts = [
+            wh_id[0:2],
+            wh_id[2:6],
+            wh_id[6:8],
+            wh_id[8:11],
+            wh_id[11:14],
+            wh_id[14:16],
+            wh_id[16:20],
+            wh_id[20:]
+        ]
+        return '-'.join(parts)
+    except:
+        return wh_id
+
+# Регистрация фильтра в Jinja
+app.jinja_env.filters['wh_formatter'] = wh_formatter
 
 def check_kafka_connection():
     try:
@@ -91,6 +119,35 @@ def start_kafka_consumer():
                     pass
 
 
+def start_stock_consumer():
+    app.logger.info("Starting stock consumer")
+    while True:
+        try:
+            consumer = KafkaConsumer(
+                app.config['KAFKA_STOCK_TOPIC'],
+                bootstrap_servers=app.config['KAFKA_BOOTSTRAP_SERVERS'],
+                value_deserializer=lambda x: json.loads(x.decode('utf-8')),
+                group_id='wi-stock-group',
+                auto_offset_reset='earliest',
+                enable_auto_commit=False
+            )
+
+            app.logger.info("Connected to Kafka stock topic")
+
+            for message in consumer:
+                app.logger.debug(f"Received stock message: {message.value}")
+                with stock_lock:
+                    for warehouse, items in message.value.items():
+                        warehouse_stock[warehouse] = {
+                            item['pgd_id']: item['quantity']
+                            for item in items
+                        }
+                        app.logger.info(f"Updated stock for warehouse: {warehouse}")
+
+        except Exception as e:
+            app.logger.error(f"Stock consumer error: {str(e)}")
+            time.sleep(5)
+
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -101,16 +158,22 @@ def load_user(user_id):
 @login_required
 def index():
     section = request.args.get('section', 'products')
-    with products_cache_lock:
-        current_products = products_cache.copy()
+    selected_wh = request.args.get('warehouse', 'all')
 
-    app.logger.debug(f"Rendering page with {len(current_products)} products")
+    with products_cache_lock:
+        products = products_cache.copy()
+
+    with stock_lock:
+        if selected_wh != 'all':
+            stock = warehouse_stock.get(selected_wh, {})
+            products = [p for p in products if stock.get(p['id'], 0) > 0]
 
     return render_template(
         'index.html',
         section=section,
-        warehouse=warehouse,
-        products=current_products
+        products=products,
+        warehouses=list(warehouse_stock.keys()),
+        selected_wh=selected_wh
     )
 
 
@@ -137,6 +200,55 @@ def register():
         flash('Registration successful!')
         return redirect(url_for('login'))
     return render_template('register.html', form=form)
+
+
+@app.route('/create_invoice', methods=['POST'])
+@login_required
+def create_invoice():
+    try:
+        invoice_type = request.form.get('type')
+        sender_wh = request.form.get('warehouse')
+
+        # Для departure указываем получателя
+        receiver_wh = "WHAAAAAARUS060ru00000002" if invoice_type == "departure" else sender_wh
+
+        # Проверка совпадения складов
+        if invoice_type == "arrival" and sender_wh == Config.RECIPIENT_WAREHOUSE:
+            raise ValueError("Невозможно принять товар на тот же склад")
+
+        # Формируем сообщение с метаданными
+        message = {
+            'headers': {
+                'sender': sender_wh,
+                'receiver': receiver_wh,
+                'type': invoice_type
+            },
+            'body': {
+                'items': [
+                    {'pgd_id': int(request.form[f'items[{i}][id]']),
+                     'quantity': int(request.form[f'items[{i}][quantity]'])}
+                    for i in range(len(request.form) // 2)
+                ]
+            }
+        }
+
+        # Отправка в Kafka
+        producer.send(
+            app.config['KAFKA_INVOICE_TOPIC'],
+            value=json.dumps(message).encode('utf-8'),
+            headers=[
+                ('sender', sender_wh.encode()),
+                ('receiver', receiver_wh.encode())
+            ]
+        )
+        producer.flush()
+
+        flash('Накладная создана', 'success')
+    except Exception as e:
+        app.logger.error(f"Ошибка: {str(e)}")
+        flash(f'Ошибка: {str(e)}', 'danger')
+
+    return redirect(url_for('index', section='tasks'))
 
 
 @app.route('/settings', methods=['GET', 'POST'])
@@ -178,6 +290,7 @@ def create_admin():
 if __name__ == '__main__':
     if check_kafka_connection():
         threading.Thread(target=start_kafka_consumer, daemon=True).start()
+        threading.Thread(target=start_stock_consumer, daemon=True).start()
     else:
         app.logger.error("Failed to connect to Kafka")
 
