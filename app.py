@@ -2,6 +2,7 @@
 import time
 from collections import defaultdict
 from datetime import datetime
+from datetime import timedelta
 
 from flask import Flask, render_template, redirect, url_for, request, flash
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
@@ -161,11 +162,11 @@ def start_stock_consumer():
             app.logger.info("Connected to Kafka stock topic")
 
             for message in consumer:
-                app.logger.debug(f"Received stock message: {message.value}")
                 with stock_lock:
-                    for warehouse, items in message.value.items():
-                        warehouse_stock[warehouse] = {
-                            item['pgd_id']: item['quantity']
+                    for warehouse_id, items in message.value.items():
+                        # Преобразовываем ID товаров к строке
+                        warehouse_stock[warehouse_id] = {
+                            str(item['pgd_id']): item['quantity']
                             for item in items
                         }
                         app.logger.info(f"Updated stock for warehouse: {warehouse}")
@@ -187,20 +188,51 @@ def index():
     selected_wh = request.args.get('warehouse', 'all')
 
     with products_cache_lock:
-        products = products_cache.copy()
+        # Делаем глубокую копию для безопасности
+        products = [p.copy() for p in products_cache]
 
     with stock_lock:
         if selected_wh != 'all':
+            # Фильтруем товары для выбранного склада
             stock = warehouse_stock.get(selected_wh, {})
-            products = [p for p in products if stock.get(p['id'], 0) > 0]
+            filtered_products = [
+                p for p in products
+                if stock.get(str(p['id']), 0) > 0  # Явное преобразование к строке
+            ]
+        else:
+            # Показываем все товары из PGD
+            filtered_products = products
+
+    # invoices = get_filtered_invoices(request.args.get('warehouse', 'all'))
+    # # Добавьте проверку:
+    # for invoice in invoices:
+    #     if not hasattr(invoice, 'items'):
+    #         invoice['items'] = []  # Или другое значение по умолчанию
 
     return render_template(
         'index.html',
         section=section,
-        products=products,
-        warehouses=list(warehouse_stock.keys()),#warehouses=list(active_warehouses),
-        selected_wh=selected_wh
+        products=filtered_products,
+        warehouses=warehouse_manager.get_active_warehouses(),
+        selected_wh=selected_wh,
+        invoices=get_filtered_invoices(selected_wh)  # Передаем правильные данные
     )
+
+
+def get_filtered_invoices(selected_wh):
+    return [
+        {
+            'type': 'arrival',
+            'sender': 'WHAAAAAARUS060ru00000001',
+            'receiver': 'WHBBBBBBRUS060ru00000002',
+            'status': 'completed',
+            'items': [  # Явно указываем список товаров
+                {'name': 'Тестовый товар 1', 'quantity': 10},
+                {'name': 'Тестовый товар 2', 'quantity': 5}
+            ],
+            'timestamp': datetime.utcnow().isoformat()
+        }
+    ]
 
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -303,6 +335,63 @@ def logout():
     return redirect(url_for('login'))
 
 
+class WarehouseManager:
+    def __init__(self):
+        self.warehouses = {}
+        self.lock = threading.Lock()
+        self.consumer_thread = threading.Thread(target=self._consume_updates, daemon=True)
+        self.consumer_thread.start()
+
+    def _consume_updates(self):
+        consumer = KafkaConsumer(
+            app.config['KAFKA_WH_REGISTRY_TOPIC'],
+            bootstrap_servers=app.config['KAFKA_BOOTSTRAP_SERVERS'],
+            value_deserializer=lambda x: json.loads(x.decode('utf-8')),
+            group_id='wi-warehouse-group'
+        )
+
+        for message in consumer:
+            with self.lock:
+                data = message.value
+                self.warehouses[data['wh_id']] = {
+                    'status': data['status'],
+                    'metadata': data.get('metadata', {}),
+                    'last_seen': datetime.utcnow()
+                }
+                self._cleanup_inactive()
+
+    def _cleanup_inactive(self):
+        cutoff = datetime.utcnow() - timedelta(minutes=5)
+        inactive = [wh_id for wh_id, wh in self.warehouses.items()
+                    if wh['last_seen'] < cutoff]
+        for wh_id in inactive:
+            del self.warehouses[wh_id]
+
+    def get_active_warehouses(self):
+        with self.lock:
+            return [
+                {**wh, 'wh_id': wh_id}
+                for wh_id, wh in self.warehouses.items()
+                if wh['status'] == 'active'
+            ]
+
+
+warehouse_manager = WarehouseManager()
+
+
+@app.template_filter('wh_formatter')
+def wh_formatter(wh):
+    """Улучшенный фильтр форматирования"""
+    if isinstance(wh, dict):
+        name = wh.get('metadata', {}).get('name', wh['wh_id'])
+        return f"{name} ({wh['wh_id'][:4]}...{wh['wh_id'][-4:]})"
+
+    if isinstance(wh, str):
+        return f"{wh[:4]}...{wh[-4:]}"
+
+    return str(wh)
+
+
 # Добавляем новый consumer для обновлений накладных
 def start_invoice_updates_consumer():
     while True:
@@ -319,7 +408,8 @@ def start_invoice_updates_consumer():
             for message in consumer:
                 with app.app_context():
                     invoice = message.value
-                    # Здесь можно сохранять в БД WI или обновлять кэш
+                    if not isinstance(invoice.get('items', []), list):
+                        invoice['items'] = []  # Здесь можно сохранять в БД WI или обновлять кэш
 
         except Exception as e:
             app.logger.error(f"Invoice consumer error: {str(e)}")
@@ -334,7 +424,6 @@ def create_admin():
             db.session.add(admin)
             db.session.commit()
             print("Admin user created!")
-
 
 
 if __name__ == '__main__':

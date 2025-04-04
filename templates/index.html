@@ -56,6 +56,42 @@
     {% elif section == 'tasks' %}
     <h2 class="mb-4">Управление накладными</h2>
 
+
+
+    <div class="row mb-4">
+    <div class="col-md-6">
+        <div class="input-group">
+            <span class="input-group-text">
+                <i class="bi bi-building"></i>
+            </span>
+            <select class="form-select" id="warehouseFilterTasks">
+                <option value="all">Все склады</option>
+                {% for wh in warehouses %}
+                <option value="{{ wh.wh_id }}"
+                        {% if selected_wh == wh.wh_id %}selected{% endif %}>
+                    {{ wh | wh_formatter }}
+                    {% if wh.metadata.location %}
+                    ({{ wh.metadata.location }})
+                    {% endif %}
+                </option>
+                {% endfor %}
+            </select>
+        </div>
+    </div>
+</div>
+
+<script>
+document.getElementById('warehouseFilterTasks')?.addEventListener('change', function() {
+    const filter = this.value;
+    window.location.href = `${window.location.pathname}?section=tasks&warehouse=${filter}`;
+});
+</script>
+
+
+
+
+
+
     <div class="mb-4">
         <button type="button"
                 class="btn btn-primary"
@@ -81,7 +117,8 @@
                     </thead>
                     <tbody id="invoicesTable">
                         {% for invoice in invoices %}
-                        <tr class="position-relative">
+                        {% if invoice.items is defined and invoice.items is not none %}
+                            <tr class="position-relative">
                             <td class="ps-4 text-uppercase fw-bold">
                                 {{ invoice.type | replace("_", " ") }}
                             </td>
@@ -106,17 +143,18 @@
                             </td>
                             <td>
                                 <div class="d-flex flex-wrap gap-2">
-                                    {% for item in invoice.items %}
-                                    <span class="badge bg-primary rounded-pill">
-                                        {{ item.name }} ({{ item.quantity }})
-                                    </span>
-                                    {% endfor %}
+                                     {% for item in invoice['items'] %}  <!-- Явное обращение к ключу словаря -->
+        <span class="badge bg-primary rounded-pill">
+            {{ item.name }} ({{ item.quantity }})
+        </span>
+        {% endfor %}
                                 </div>
                             </td>
                             <td class="pe-4">
                                 {{ invoice.timestamp | datetimeformat }}
                             </td>
                         </tr>
+                        {% endif %}
                         {% else %}
                         <tr>
                             <td colspan="6" class="text-center py-5">
@@ -154,14 +192,20 @@
                             </div>
 
                             <div class="col-md-6">
-                                <label class="form-label required">Склад-отправитель</label>
-                                <select name="sender" class="form-select" required>
-                                    <option value="" disabled selected>Выберите склад</option>
-                                    {% for wh in warehouses %}
-                                    <option value="{{ wh }}">{{ wh|wh_formatter }}</option>
-                                    {% endfor %}
-                                </select>
-                            </div>
+    <label class="form-label required">Склад-отправитель</label>
+    <select name="sender" class="form-select" required>
+        <option value="" disabled selected>Выберите склад</option>
+        {% for wh in warehouses %}
+        <option value="{{ wh.wh_id }}"
+                data-location="{{ wh.metadata.location | default('') }}">
+            {{ wh | wh_formatter }}
+            {% if wh.metadata.location %}
+            ({{ wh.metadata.location }})
+            {% endif %}
+        </option>
+        {% endfor %}
+    </select>
+</div>
 
                             <div class="col-md-6">
                                 <label class="form-label required">Склад-получатель</label>
@@ -267,6 +311,27 @@ document.addEventListener('DOMContentLoaded', function() {
 </script>
 
 <style>
+    .select2-container--bootstrap-5 .select2-results__option {
+    padding: 0.5rem 1rem;
+}
+
+.select2-container--bootstrap-5 .select2-results__option[aria-selected="true"] {
+    background-color: #e9ecef;
+}
+
+.warehouse-option {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.warehouse-meta {
+    font-size: 0.8em;
+    color: #6c757d;
+}
+
+
+
 .wh-id {
     font-family: 'SFMono-Regular', Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
     font-size: 0.875em;
@@ -310,5 +375,6 @@ document.addEventListener('DOMContentLoaded', function() {
         margin: 0.5rem;
     }
 }
+
 </style>
 {% endblock %}

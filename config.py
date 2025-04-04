@@ -10,3 +10,4 @@ class Config:
     KAFKA_PRODUCT_TOPIC = 'products'
     KAFKA_STOCK_TOPIC = 'warehouse_stock_updates'
     KAFKA_INVOICE_TOPIC = 'invoice_requests'
+    KAFKA_WH_REGISTRY_TOPIC = 'warehouse_registry'
