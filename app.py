@@ -1,6 +1,8 @@
 #app.py
 import time
 from collections import defaultdict
+from datetime import datetime
+
 from flask import Flask, render_template, redirect, url_for, request, flash
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from kafka.errors import KafkaError, NoBrokersAvailable
@@ -23,6 +25,12 @@ warehouse_stock = defaultdict(dict)
 stock_lock = threading.Lock()
 #active_warehouses = set()
 
+# Инициализируем продюсер
+producer = KafkaProducer(
+    bootstrap_servers=app.config['KAFKA_BOOTSTRAP_SERVERS'],
+    value_serializer=lambda v: json.dumps(v).encode('utf-8')
+)
+
 
 # Инициализация расширений
 db.init_app(app)
@@ -37,6 +45,25 @@ warehouse = {
     'tasks': [],
     'auto_balance_params': {'threshold': 100, 'interval': 60}
 }
+
+
+@app.template_filter('datetimeformat')
+def datetimeformat_filter(value, format='%d.%m.%Y %H:%M'):
+    try:
+        if not value:
+            return "Дата не указана"
+
+        if isinstance(value, str):
+            try:
+                value = datetime.fromisoformat(value)
+            except ValueError:
+                return "Неверный формат даты"
+
+        return value.strftime(format)
+
+    except Exception as e:
+        app.logger.error(f"Ошибка форматирования даты: {str(e)}")
+        return "Ошибка даты"
 
 def wh_formatter(wh_id):
     """Форматирует WH ID в читаемый вид"""
@@ -206,30 +233,41 @@ def register():
 @login_required
 def create_invoice():
     try:
-        invoice_data = {
-            'type': 'departure',  # Тип определяется бизнес-логикой
-            'sender': request.form['sender'],
-            'receiver': request.form['receiver'],
-            'items': []
-        }
+        invoice_type = request.form.get('type')
+        sender = request.form['sender']
+        receiver = request.form['receiver']
 
-        # Сбор данных о товарах
+        items = []
         for key in request.form:
             if key.startswith('items'):
-                index = key.split('[')[1].split(']')[0]
-                field = key.split('[')[2].split(']')[0]
-                if int(index) >= len(invoice_data['items']):
-                    invoice_data['items'].append({})
-                invoice_data['items'][int(index)][field] = request.form[key]
+                parts = key.split('[')
+                if len(parts) == 3:
+                    idx = parts[1].split(']')[0]
+                    field = parts[2].split(']')[0]
+                    if int(idx) >= len(items):
+                        items.append({})
+                    items[int(idx)][field] = request.form[key]
 
-        if invoice_data['sender'] == invoice_data['receiver']:
-            raise ValueError("Отправитель и получатель совпадают")
+        # Валидация данных
+        if len(sender) != 24 or len(receiver) != 24:
+            raise ValueError("Некорректный формат склада")
 
-        # Отправка в Kafka
-        producer.send(
-            'invoice_requests',
-            value=json.dumps(invoice_data).encode('utf-8')
-        )
+        if sender == receiver:
+            raise ValueError("Склады отправителя и получателя совпадают")
+
+        # Формируем сообщение
+        invoice_data = {
+            'type': invoice_type,
+            'sender': sender,
+            'receiver': receiver,
+            'items': [{
+                'id': int(item['id']),
+                'quantity': int(item['quantity'])
+            } for item in items]
+        }
+
+        # Отправляем в Kafka
+        producer.send('invoice_requests', invoice_data)
         producer.flush()
 
         flash('Накладная успешно создана', 'success')
@@ -265,20 +303,27 @@ def logout():
     return redirect(url_for('login'))
 
 
-def start_warehouse_registry_consumer():
-    consumer = KafkaConsumer(
-        app.config['KAFKA_WH_REGISTRY_TOPIC'],
-        bootstrap_servers=app.config['KAFKA_BOOTSTRAP_SERVERS'],
-        value_deserializer=lambda x: json.loads(x.decode('utf-8')),
-        group_id='wi-warehouse-registry'
-    )
+# Добавляем новый consumer для обновлений накладных
+def start_invoice_updates_consumer():
+    while True:
+        try:
+            consumer = KafkaConsumer(
+                'invoice_updates',
+                bootstrap_servers=app.config['KAFKA_BOOTSTRAP_SERVERS'],
+                value_deserializer=lambda x: json.loads(x.decode('utf-8')),
+                group_id='wi-invoice-group'
+            )
 
-    for message in consumer:
-        wh_data = message.value
-        if wh_data['status'] == 'active':
-            active_warehouses.add(wh_data['wh_id'])
-        else:
-            active_warehouses.discard(wh_data['wh_id'])
+            app.logger.info("Connected to invoice updates topic")
+
+            for message in consumer:
+                with app.app_context():
+                    invoice = message.value
+                    # Здесь можно сохранять в БД WI или обновлять кэш
+
+        except Exception as e:
+            app.logger.error(f"Invoice consumer error: {str(e)}")
+            time.sleep(5)
 
 
 def create_admin():
@@ -291,10 +336,12 @@ def create_admin():
             print("Admin user created!")
 
 
+
 if __name__ == '__main__':
     if check_kafka_connection():
         threading.Thread(target=start_kafka_consumer, daemon=True).start()
         threading.Thread(target=start_stock_consumer, daemon=True).start()
+        threading.Thread(target=start_invoice_updates_consumer, daemon=True).start()
     else:
         app.logger.error("Failed to connect to Kafka")
 

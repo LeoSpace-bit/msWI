@@ -9,8 +9,7 @@
             <select class="form-select" id="warehouseFilter">
                 <option value="all">Все склады</option>
                 {% for warehouse in warehouses %}
-                    <option value="{{ warehouse }}"
-                        {% if warehouse == selected_wh %}selected{% endif %}>
+                    <option value="{{ warehouse }}" {% if warehouse == selected_wh %}selected{% endif %}>
                         <span class="wh-id">{{ warehouse | wh_formatter }}</span>
                     </option>
                 {% endfor %}
@@ -53,173 +52,253 @@
             </div>
         {% endif %}
     </div>
+
     {% elif section == 'tasks' %}
     <h2 class="mb-4">Управление накладными</h2>
 
-    <div class="row g-4 mb-4">
-        {% for warehouse in warehouses %}
-        <div class="col-md-6">
-            <div class="card warehouse-card">
-                <div class="card-body">
-                    <h5 class="card-title">
-                        <i class="bi bi-building"></i>
-                        {{ warehouse|wh_formatter }}
-                    </h5>
-
-                    <div class="invoice-forms mt-3">
-                        <button type="button"
-                                class="btn btn-primary btn-sm"
-                                data-bs-toggle="modal"
-                                data-bs-target="#invoiceModal"
-                                data-sender="{{ warehouse }}">
-                            Создать накладную
-                        </button>
-                    </div>
-                </div>
-            </div>
-        </div>
-        {% endfor %}
+    <div class="mb-4">
+        <button type="button"
+                class="btn btn-primary"
+                data-bs-toggle="modal"
+                data-bs-target="#createInvoiceModal">
+            <i class="bi bi-file-earmark-plus me-2"></i>Создать накладную
+        </button>
     </div>
 
-    <!-- Модальное окно -->
-    <div class="modal fade" id="invoiceModal" tabindex="-1">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <form method="POST" action="/create_invoice">
-                    <input type="hidden" name="sender" id="modalSender">
-                    <div class="modal-body">
-                        <div class="mb-3">
-                            <label>Склад-получатель:</label>
-                            <select name="receiver" class="form-select" required>
-                                {% for wh in warehouses %}
-                                    <option value="{{ wh }}">{{ wh|wh_formatter }}</option>
-                                {% endfor %}
-                            </select>
-                        </div>
+    <div class="card border-0 shadow">
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0">
+                    <thead class="bg-light">
+                        <tr>
+                            <th class="ps-4">Тип</th>
+                            <th>Отправитель</th>
+                            <th>Получатель</th>
+                            <th>Статус</th>
+                            <th>Товары</th>
+                            <th class="pe-4">Дата</th>
+                        </tr>
+                    </thead>
+                    <tbody id="invoicesTable">
+                        {% for invoice in invoices %}
+                        <tr class="position-relative">
+                            <td class="ps-4 text-uppercase fw-bold">
+                                {{ invoice.type | replace("_", " ") }}
+                            </td>
+                            <td>
+                                <span class="wh-id">
+                                    {{ invoice.sender | wh_formatter }}
+                                </span>
+                            </td>
+                            <td>
+                                <span class="wh-id">
+                                    {{ invoice.receiver | wh_formatter }}
+                                </span>
+                            </td>
+                            <td>
+                                <span class="badge rounded-pill bg-{{
+                                    'success' if invoice.status == 'completed'
+                                    else 'warning' if invoice.status == 'shipping'
+                                    else 'danger'
+                                }}">
+                                    {{ invoice.status | upper }}
+                                </span>
+                            </td>
+                            <td>
+                                <div class="d-flex flex-wrap gap-2">
+                                    {% for item in invoice.items %}
+                                    <span class="badge bg-primary rounded-pill">
+                                        {{ item.name }} ({{ item.quantity }})
+                                    </span>
+                                    {% endfor %}
+                                </div>
+                            </td>
+                            <td class="pe-4">
+                                {{ invoice.timestamp | datetimeformat }}
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="6" class="text-center py-5">
+                                <i class="bi bi-inboxes display-4 text-muted"></i>
+                                <h5 class="mt-3">Нет активных накладных</h5>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
 
-                        <div class="mb-3">
-                            <label>Товары:</label>
-                            <div id="itemsContainer">
-                                <div class="item-row mb-2">
-                                    <select name="items[0][id]" class="form-select">
-                                        {% for product in products %}
-                                        <option value="{{ product.id }}">{{ product.name }}</option>
-                                        {% endfor %}
-                                    </select>
-                                    <input type="number" name="items[0][quantity]"
-                                           class="form-control mt-1" min="1" value="1">
+    <!-- Модальное окно создания накладной -->
+    <div class="modal fade" id="createInvoiceModal" tabindex="-1" aria-labelledby="createInvoiceModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <form method="POST" action="{{ url_for('create_invoice') }}" id="invoiceForm">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="createInvoiceModalLabel">
+                            <i class="bi bi-file-earmark-text me-2"></i>Новая накладная
+                        </h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label class="form-label required">Тип накладной</label>
+                                <select name="type" class="form-select" required>
+                                    <option value="" disabled selected>Выберите тип</option>
+                                    <option value="arrival">Приемка товара</option>
+                                    <option value="departure">Отгрузка товара</option>
+                                </select>
+                            </div>
+
+                            <div class="col-md-6">
+                                <label class="form-label required">Склад-отправитель</label>
+                                <select name="sender" class="form-select" required>
+                                    <option value="" disabled selected>Выберите склад</option>
+                                    {% for wh in warehouses %}
+                                    <option value="{{ wh }}">{{ wh|wh_formatter }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+
+                            <div class="col-md-6">
+                                <label class="form-label required">Склад-получатель</label>
+                                <select name="receiver" class="form-select" required>
+                                    <option value="" disabled selected>Выберите склад</option>
+                                    {% for wh in warehouses %}
+                                    <option value="{{ wh }}">{{ wh|wh_formatter }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+
+                            <div class="col-12">
+                                <hr class="my-4">
+                                <div class="d-flex justify-content-between align-items-center mb-3">
+                                    <h6 class="mb-0">Товары в накладной</h6>
+                                    <button type="button" class="btn btn-sm btn-outline-primary" id="addItemBtn">
+                                        <i class="bi bi-plus-lg me-2"></i>Добавить товар
+                                    </button>
+                                </div>
+
+                                <div id="itemsContainer">
+                                    <div class="item-row row g-2 mb-3">
+                                        <div class="col-6">
+                                            <select name="items[0][id]" class="form-select" required>
+                                                <option value="" disabled selected>Выберите товар</option>
+                                                {% for product in products %}
+                                                <option value="{{ product.id }}">{{ product.name }}</option>
+                                                {% endfor %}
+                                            </select>
+                                        </div>
+                                        <div class="col-4">
+                                            <input type="number"
+                                                   name="items[0][quantity]"
+                                                   class="form-control"
+                                                   min="1"
+                                                   value="1"
+                                                   required
+                                                   placeholder="Количество">
+                                        </div>
+                                        <div class="col-2">
+                                            <button type="button" class="btn btn-danger btn-sm w-100" disabled>
+                                                <i class="bi bi-trash"></i>
+                                            </button>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
-                            <button type="button" onclick="addItemRow()" class="btn btn-sm btn-secondary">
-                                Добавить товар
-                            </button>
                         </div>
                     </div>
                     <div class="modal-footer">
-                        <button type="submit" class="btn btn-primary">Создать</button>
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                        <button type="submit" class="btn btn-primary">
+                            <i class="bi bi-save me-2"></i>Создать накладную
+                        </button>
                     </div>
                 </form>
             </div>
         </div>
     </div>
-
     {% endif %}
 </div>
 
-{% if section == 'tasks' %}
 <script>
-// Инициализация модального окна
-document.getElementById('invoiceModal').addEventListener('show.bs.modal', function(event) {
-    document.getElementById('modalSender').value = event.relatedTarget.dataset.sender;
-});
+document.addEventListener('DOMContentLoaded', function() {
+    // Warehouse filter
+    document.getElementById('warehouseFilter')?.addEventListener('change', function() {
+        const filter = this.value;
+        window.location.href = `${window.location.pathname}?section=products&warehouse=${filter}`;
+    });
 
-// Динамическое добавление полей
-let itemIndex = 1; // Изменено на 1, чтобы избежать конфликта с изначальным полем
-function addItemRow() {
+    // Invoice items management
+    let itemIndex = 1;
     const container = document.getElementById('itemsContainer');
-    const newRow = `
-        <div class="item-row mb-2">
-            <select name="items[${itemIndex}][id]" class="form-select">
-                {% for product in products %}
-                <option value="{{ product.id }}">{{ product.name }}</option>
-                {% endfor %}
-            </select>
-            <input type="number" name="items[${itemIndex}][quantity]" class="form-control mt-1" min="1" value="1">
-        </div>`;
-    container.insertAdjacentHTML('beforeend', newRow);
-    itemIndex++;
-}
-</script>
-{% endif %}
+    const template = document.querySelector('.item-row').cloneNode(true);
 
-<script>
-document.getElementById('warehouseFilter').addEventListener('change', function() {
-    const filter = this.value;
-    window.location.href = `${window.location.pathname}?section=products&warehouse=${filter}`;
+    document.getElementById('addItemBtn')?.addEventListener('click', function() {
+        const newRow = template.cloneNode(true);
+        const inputs = newRow.querySelectorAll('select, input');
+
+        // Update names and IDs
+        inputs.forEach(input => {
+            const name = input.name.replace('[0]', `[${itemIndex}]`);
+            input.name = name;
+            input.value = input.tagName === 'SELECT' ? '' : '1';
+        });
+
+        // Enable delete button
+        const deleteBtn = newRow.querySelector('button');
+        deleteBtn.disabled = false;
+        deleteBtn.addEventListener('click', () => newRow.remove());
+
+        container.appendChild(newRow);
+        itemIndex++;
+    });
+
+    // Delete item handler
+    container.addEventListener('click', function(e) {
+        if (e.target.closest('button')) {
+            e.target.closest('.item-row').remove();
+        }
+    });
 });
 </script>
 
 <style>
-.warehouse-card {
-    transition: transform 0.2s;
-    border-left: 4px solid #0d6efd;
-}
-.warehouse-card:hover {
-    transform: translateY(-3px);
-}
-.item-row {
-    display: grid;
-    grid-template-columns: 2fr 1fr;
-    gap: 10px;
-}
-#addItem {
-    margin-top: 10px;
-}
 .wh-id {
-    font-family: monospace;
-    letter-spacing: 0.1em;
-    color: #2c3e50;
-    font-size: 0.9em;
-}
-
-.card {
-    opacity: 0;
-    animation: fadeIn 0.5s ease-in forwards;
-}
-
-@keyframes fadeIn {
-    from { opacity: 0; transform: translateY(20px); }
-    to { opacity: 1; transform: translateY(0); }
+    font-family: 'SFMono-Regular', Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-size: 0.875em;
+    letter-spacing: 0.05em;
 }
 
 .product-image {
     height: 200px;
     object-fit: cover;
-    border-bottom: 1px solid rgba(0,0,0,.125);
+    object-position: center;
+    border-bottom: 1px solid var(--bs-border-color);
 }
 
-.card {
-    transition: transform 0.2s, box-shadow 0.2s;
-    border-radius: 15px;
-    overflow: hidden;
-}
-
-.card:hover {
-    transform: translateY(-5px);
-    box-shadow: 0 8px 16px rgba(0,0,0,.1);
-}
-
-.card-title {
-    min-height: 3em;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
+.table thead th {
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 0.8em;
+    letter-spacing: 0.05em;
 }
 
 .badge {
-    font-size: 0.9em;
-    padding: 0.5em 0.75em;
+    font-weight: 500;
+}
+
+.item-row:not(:last-child) {
+    margin-bottom: 0.75rem;
+}
+
+.required::after {
+    content: "*";
+    color: #dc3545;
+    margin-left: 0.25rem;
 }
 
 @media (max-width: 768px) {
@@ -227,12 +306,8 @@ document.getElementById('warehouseFilter').addEventListener('change', function()
         height: 150px;
     }
 
-    .card-title {
-        font-size: 1.1rem;
-    }
-
-    .h4 {
-        font-size: 1.25rem;
+    .modal-dialog {
+        margin: 0.5rem;
     }
 }
 </style>
