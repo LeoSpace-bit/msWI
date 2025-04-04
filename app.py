@@ -5,13 +5,11 @@ from flask import Flask, render_template, redirect, url_for, request, flash
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from kafka.errors import KafkaError, NoBrokersAvailable
 
-from config import Config
-
 from forms import LoginForm, RegistrationForm, WarehouseSettingsForm
 from database import db
 from models import User
 from flask_migrate import Migrate
-from kafka import KafkaConsumer, KafkaProducer
+from kafka import KafkaConsumer, KafkaProducer, producer
 import json
 import threading
 
@@ -23,6 +21,7 @@ products_cache = []
 products_cache_lock = threading.Lock()  # Добавляем блокировку
 warehouse_stock = defaultdict(dict)
 stock_lock = threading.Lock()
+#active_warehouses = set()
 
 
 # Инициализация расширений
@@ -172,7 +171,7 @@ def index():
         'index.html',
         section=section,
         products=products,
-        warehouses=list(warehouse_stock.keys()),
+        warehouses=list(warehouse_stock.keys()),#warehouses=list(active_warehouses),
         selected_wh=selected_wh
     )
 
@@ -202,50 +201,39 @@ def register():
     return render_template('register.html', form=form)
 
 
+# WI/app.py
 @app.route('/create_invoice', methods=['POST'])
 @login_required
 def create_invoice():
     try:
-        invoice_type = request.form.get('type')
-        sender_wh = request.form.get('warehouse')
-
-        # Для departure указываем получателя
-        receiver_wh = "WHAAAAAARUS060ru00000002" if invoice_type == "departure" else sender_wh
-
-        # Проверка совпадения складов
-        if invoice_type == "arrival" and sender_wh == Config.RECIPIENT_WAREHOUSE:
-            raise ValueError("Невозможно принять товар на тот же склад")
-
-        # Формируем сообщение с метаданными
-        message = {
-            'headers': {
-                'sender': sender_wh,
-                'receiver': receiver_wh,
-                'type': invoice_type
-            },
-            'body': {
-                'items': [
-                    {'pgd_id': int(request.form[f'items[{i}][id]']),
-                     'quantity': int(request.form[f'items[{i}][quantity]'])}
-                    for i in range(len(request.form) // 2)
-                ]
-            }
+        invoice_data = {
+            'type': 'departure',  # Тип определяется бизнес-логикой
+            'sender': request.form['sender'],
+            'receiver': request.form['receiver'],
+            'items': []
         }
+
+        # Сбор данных о товарах
+        for key in request.form:
+            if key.startswith('items'):
+                index = key.split('[')[1].split(']')[0]
+                field = key.split('[')[2].split(']')[0]
+                if int(index) >= len(invoice_data['items']):
+                    invoice_data['items'].append({})
+                invoice_data['items'][int(index)][field] = request.form[key]
+
+        if invoice_data['sender'] == invoice_data['receiver']:
+            raise ValueError("Отправитель и получатель совпадают")
 
         # Отправка в Kafka
         producer.send(
-            app.config['KAFKA_INVOICE_TOPIC'],
-            value=json.dumps(message).encode('utf-8'),
-            headers=[
-                ('sender', sender_wh.encode()),
-                ('receiver', receiver_wh.encode())
-            ]
+            'invoice_requests',
+            value=json.dumps(invoice_data).encode('utf-8')
         )
         producer.flush()
 
-        flash('Накладная создана', 'success')
+        flash('Накладная успешно создана', 'success')
     except Exception as e:
-        app.logger.error(f"Ошибка: {str(e)}")
         flash(f'Ошибка: {str(e)}', 'danger')
 
     return redirect(url_for('index', section='tasks'))
@@ -275,6 +263,22 @@ def warehouse_settings():
 def logout():
     logout_user()
     return redirect(url_for('login'))
+
+
+def start_warehouse_registry_consumer():
+    consumer = KafkaConsumer(
+        app.config['KAFKA_WH_REGISTRY_TOPIC'],
+        bootstrap_servers=app.config['KAFKA_BOOTSTRAP_SERVERS'],
+        value_deserializer=lambda x: json.loads(x.decode('utf-8')),
+        group_id='wi-warehouse-registry'
+    )
+
+    for message in consumer:
+        wh_data = message.value
+        if wh_data['status'] == 'active':
+            active_warehouses.add(wh_data['wh_id'])
+        else:
+            active_warehouses.discard(wh_data['wh_id'])
 
 
 def create_admin():

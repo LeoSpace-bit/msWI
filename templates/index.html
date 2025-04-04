@@ -5,17 +5,17 @@
     {% if section == 'products' %}
     <h2 class="mb-4">Каталог товаров</h2>
     <div class="row mb-4">
-    <div class="col-md-4">
-        <select class="form-select" id="warehouseFilter">
-            <option value="all">Все склады</option>
+        <div class="col-md-4">
+            <select class="form-select" id="warehouseFilter">
+                <option value="all">Все склады</option>
                 {% for warehouse in warehouses %}
                     <option value="{{ warehouse }}"
                         {% if warehouse == selected_wh %}selected{% endif %}>
                         <span class="wh-id">{{ warehouse | wh_formatter }}</span>
                     </option>
                 {% endfor %}
-        </select>
-    </div>
+            </select>
+        </div>
     </div>
     <div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4">
         {% if products %}
@@ -54,78 +54,64 @@
         {% endif %}
     </div>
     {% elif section == 'tasks' %}
-        <!-- Новый контент для управления задачами -->
     <h2 class="mb-4">Управление накладными</h2>
 
-    <div class="warehouse-controls">
-        <div class="row g-4">
-            {% for warehouse in warehouses %}
-            <div class="col-md-6">
-                <div class="card warehouse-card">
-                    <div class="card-body">
-                        <h5 class="card-title">
-                            <i class="bi bi-building"></i>
-                            {{ warehouse|wh_formatter }}
-                        </h5>
+    <div class="row g-4 mb-4">
+        {% for warehouse in warehouses %}
+        <div class="col-md-6">
+            <div class="card warehouse-card">
+                <div class="card-body">
+                    <h5 class="card-title">
+                        <i class="bi bi-building"></i>
+                        {{ warehouse|wh_formatter }}
+                    </h5>
 
-                        <div class="invoice-forms mt-3">
-                            <div class="btn-group" role="group">
-                                <button type="button"
-                                        class="btn btn-outline-primary btn-sm"
-                                        data-bs-toggle="modal"
-                                        data-bs-target="#createInvoiceModal"
-                                        data-wh-id="{{ warehouse }}"
-                                        data-type="arrival">
-                                    Принять товар
-                                </button>
-                                <button type="button"
-                                        class="btn btn-outline-danger btn-sm"
-                                        data-bs-toggle="modal"
-                                        data-bs-target="#createInvoiceModal"
-                                        data-wh-id="{{ warehouse }}"
-                                        data-type="departure">
-                                    Отгрузить товар
-                                </button>
-                            </div>
-                        </div>
+                    <div class="invoice-forms mt-3">
+                        <button type="button"
+                                class="btn btn-primary btn-sm"
+                                data-bs-toggle="modal"
+                                data-bs-target="#invoiceModal"
+                                data-sender="{{ warehouse }}">
+                            Создать накладную
+                        </button>
                     </div>
                 </div>
             </div>
-            {% endfor %}
         </div>
+        {% endfor %}
     </div>
 
     <!-- Модальное окно -->
-    <div class="modal fade" id="createInvoiceModal" tabindex="-1">
+    <div class="modal fade" id="invoiceModal" tabindex="-1">
         <div class="modal-dialog">
             <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">Создание накладной</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                </div>
-                <form id="invoiceForm" method="POST" action="{{ url_for('create_invoice') }}">
+                <form method="POST" action="/create_invoice">
+                    <input type="hidden" name="sender" id="modalSender">
                     <div class="modal-body">
-                        <input type="hidden" id="invoiceType" name="type">
-                        <input type="hidden" id="targetWarehouse" name="warehouse">
+                        <div class="mb-3">
+                            <label>Склад-получатель:</label>
+                            <select name="receiver" class="form-select" required>
+                                {% for wh in warehouses %}
+                                    <option value="{{ wh }}">{{ wh|wh_formatter }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
 
                         <div class="mb-3">
-                            <label class="form-label">Товары:</label>
+                            <label>Товары:</label>
                             <div id="itemsContainer">
                                 <div class="item-row mb-2">
-                                    <select class="form-select item-select" name="items[0][id]">
+                                    <select name="items[0][id]" class="form-select">
                                         {% for product in products %}
                                         <option value="{{ product.id }}">{{ product.name }}</option>
                                         {% endfor %}
                                     </select>
-                                    <input type="number"
-                                           class="form-control mt-1"
-                                           name="items[0][quantity]"
-                                           min="1"
-                                           value="1">
+                                    <input type="number" name="items[0][quantity]"
+                                           class="form-control mt-1" min="1" value="1">
                                 </div>
                             </div>
-                            <button type="button" class="btn btn-sm btn-secondary" id="addItem">
-                                <i class="bi bi-plus"></i> Добавить товар
+                            <button type="button" onclick="addItemRow()" class="btn btn-sm btn-secondary">
+                                Добавить товар
                             </button>
                         </div>
                     </div>
@@ -136,41 +122,40 @@
             </div>
         </div>
     </div>
+
     {% endif %}
 </div>
 
 {% if section == 'tasks' %}
 <script>
-document.addEventListener('DOMContentLoaded', function() {
-    const modal = document.getElementById('createInvoiceModal');
+// Инициализация модального окна
+document.getElementById('invoiceModal').addEventListener('show.bs.modal', function(event) {
+    document.getElementById('modalSender').value = event.relatedTarget.dataset.sender;
+});
 
-    modal.addEventListener('show.bs.modal', function(event) {
-        const button = event.relatedTarget;
-        document.getElementById('invoiceType').value = button.dataset.type;
-        document.getElementById('targetWarehouse').value = button.dataset.whId;
-    });
-
-    document.getElementById('addItem').addEventListener('click', function() {
-        const container = document.getElementById('itemsContainer');
-        const index = container.children.length;
-
-        const newRow = document.createElement('div');
-        newRow.className = 'item-row mb-2';
-        newRow.innerHTML = `
-            <select class="form-select item-select" name="items[${index}][id]">
+// Динамическое добавление полей
+let itemIndex = 1; // Изменено на 1, чтобы избежать конфликта с изначальным полем
+function addItemRow() {
+    const container = document.getElementById('itemsContainer');
+    const newRow = `
+        <div class="item-row mb-2">
+            <select name="items[${itemIndex}][id]" class="form-select">
                 {% for product in products %}
                 <option value="{{ product.id }}">{{ product.name }}</option>
                 {% endfor %}
             </select>
-            <input type="number"
-                   class="form-control mt-1"
-                   name="items[${index}][quantity]"
-                   min="1"
-                   value="1">
-        `;
+            <input type="number" name="items[${itemIndex}][quantity]" class="form-control mt-1" min="1" value="1">
+        </div>`;
+    container.insertAdjacentHTML('beforeend', newRow);
+    itemIndex++;
+}
+</script>
+{% endif %}
 
-        container.appendChild(newRow);
-    });
+<script>
+document.getElementById('warehouseFilter').addEventListener('change', function() {
+    const filter = this.value;
+    window.location.href = `${window.location.pathname}?section=products&warehouse=${filter}`;
 });
 </script>
 
@@ -190,24 +175,14 @@ document.addEventListener('DOMContentLoaded', function() {
 #addItem {
     margin-top: 10px;
 }
-</style>
-{% endif %}
-
-<script>
-document.getElementById('warehouseFilter').addEventListener('change', function() {
-    const filter = this.value;
-    window.location.href = `${window.location.pathname}?section=products&warehouse=${filter}`;
-});
-</script>
-<style>
-    .wh-id {
+.wh-id {
     font-family: monospace;
     letter-spacing: 0.1em;
     color: #2c3e50;
     font-size: 0.9em;
 }
 
-    .card {
+.card {
     opacity: 0;
     animation: fadeIn 0.5s ease-in forwards;
 }
@@ -217,48 +192,48 @@ document.getElementById('warehouseFilter').addEventListener('change', function()
     to { opacity: 1; transform: translateY(0); }
 }
 
+.product-image {
+    height: 200px;
+    object-fit: cover;
+    border-bottom: 1px solid rgba(0,0,0,.125);
+}
+
+.card {
+    transition: transform 0.2s, box-shadow 0.2s;
+    border-radius: 15px;
+    overflow: hidden;
+}
+
+.card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 8px 16px rgba(0,0,0,.1);
+}
+
+.card-title {
+    min-height: 3em;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.badge {
+    font-size: 0.9em;
+    padding: 0.5em 0.75em;
+}
+
+@media (max-width: 768px) {
     .product-image {
-        height: 200px;
-        object-fit: cover;
-        border-bottom: 1px solid rgba(0,0,0,.125);
-    }
-
-    .card {
-        transition: transform 0.2s, box-shadow 0.2s;
-        border-radius: 15px;
-        overflow: hidden;
-    }
-
-    .card:hover {
-        transform: translateY(-5px);
-        box-shadow: 0 8px 16px rgba(0,0,0,.1);
+        height: 150px;
     }
 
     .card-title {
-        min-height: 3em;
-        display: -webkit-box;
-        -webkit-line-clamp: 2;
-        -webkit-box-orient: vertical;
-        overflow: hidden;
+        font-size: 1.1rem;
     }
 
-    .badge {
-        font-size: 0.9em;
-        padding: 0.5em 0.75em;
+    .h4 {
+        font-size: 1.25rem;
     }
-
-    @media (max-width: 768px) {
-        .product-image {
-            height: 150px;
-        }
-
-        .card-title {
-            font-size: 1.1rem;
-        }
-
-        .h4 {
-            font-size: 1.25rem;
-        }
-    }
+}
 </style>
 {% endblock %}
