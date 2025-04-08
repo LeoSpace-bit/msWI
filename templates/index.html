@@ -3,19 +3,21 @@
 {% block content %}
 <div class="section-content">
     {% if section == 'products' %}
-    <h2 class="mb-4">Каталог товаров</h2>
-    <div class="row mb-4">
+        <h2 class="mb-4">Каталог товаров</h2>
+        <div class="row mb-4">
         <div class="col-md-4">
+
             <select class="form-select" id="warehouseFilter">
-                <option value="all">Все склады</option>
-                {% for warehouse in warehouses %}
-                    <option value="{{ warehouse }}" {% if warehouse == selected_wh %}selected{% endif %}>
-                        <span class="wh-id">{{ warehouse | wh_formatter }}</span>
-                    </option>
-                {% endfor %}
-            </select>
+    <option value="all">Все склады</option>
+    {% for wh in warehouses %}
+        <option value="{{ wh.wh_id }}" {% if wh.wh_id == selected_wh %}selected{% endif %}>
+            {{ wh.wh_id | wh_formatter }}
+        </option>
+    {% endfor %}
+</select>
         </div>
     </div>
+
     <div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4">
         {% if products %}
             {% for product in products %}
@@ -195,15 +197,15 @@ document.getElementById('warehouseFilterTasks')?.addEventListener('change', func
     <label class="form-label required">Склад-отправитель</label>
     <select name="sender" class="form-select" required>
         <option value="" disabled selected>Выберите склад</option>
-        {% for wh in warehouses %}
+    {% for wh in warehouses %}
         <option value="{{ wh.wh_id }}"
                 data-location="{{ wh.metadata.location | default('') }}">
             {{ wh | wh_formatter }}
             {% if wh.metadata.location %}
-            ({{ wh.metadata.location }})
+                ({{ wh.metadata.location }})
             {% endif %}
         </option>
-        {% endfor %}
+    {% endfor %}
     </select>
 </div>
 
@@ -211,9 +213,9 @@ document.getElementById('warehouseFilterTasks')?.addEventListener('change', func
                                 <label class="form-label required">Склад-получатель</label>
                                 <select name="receiver" class="form-select" required>
                                     <option value="" disabled selected>Выберите склад</option>
-                                    {% for wh in warehouses %}
-                                    <option value="{{ wh }}">{{ wh|wh_formatter }}</option>
-                                    {% endfor %}
+    {% for wh in warehouses %}
+        <option value="{{ wh.wh_id }}">{{ wh | wh_formatter }}</option>
+    {% endfor %}
                                 </select>
                             </div>
 
@@ -269,6 +271,43 @@ document.getElementById('warehouseFilterTasks')?.addEventListener('change', func
 </div>
 
 <script>
+
+    document.getElementById('warehouseFilter').addEventListener('change', async function() {
+    const wh_id = this.value;
+
+    if (wh_id !== 'all') {
+        // Запрашиваем товары для выбранного склада
+        await fetch('/get_warehouse_goods', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({wh_id: wh_id})
+        });
+
+        // Обновляем список товаров каждые 2 секунды пока не получим данные
+        const checkInterval = setInterval(async () => {
+            const response = await fetch(`/current_goods?wh_id=${wh_id}`);
+            const data = await response.json();
+
+            if (data.goods.length > 0) {
+                clearInterval(checkInterval);
+                updateProductsDisplay(data.goods);
+            }
+        }, 2000);
+    } else {
+        // Показать все товары
+        updateProductsDisplay(allProducts);
+    }
+});
+
+function updateProductsDisplay(goods_ids) {
+    // Логика обновления отображения товаров
+    document.querySelectorAll('.product-card').forEach(card => {
+        const product_id = card.dataset.productId;
+        card.style.display = goods_ids.includes(parseInt(product_id)) ? 'block' : 'none';
+    });
+}
+
+
 document.addEventListener('DOMContentLoaded', function() {
     // Warehouse filter
     document.getElementById('warehouseFilter')?.addEventListener('change', function() {

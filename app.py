@@ -1,13 +1,14 @@
 #app.py
 import time
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 from datetime import timedelta
 
 from flask import Flask, render_template, redirect, url_for, request, flash
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from kafka.errors import KafkaError, NoBrokersAvailable
 
+from config import Config
 from forms import LoginForm, RegistrationForm, WarehouseSettingsForm
 from database import db
 from models import User
@@ -25,6 +26,8 @@ products_cache_lock = threading.Lock()  # Добавляем блокировк�
 warehouse_stock = defaultdict(dict)
 stock_lock = threading.Lock()
 #active_warehouses = set()
+invoices_cache = []
+invoices_cache_lock = threading.Lock()
 
 # Инициализируем продюсер
 producer = KafkaProducer(
@@ -93,9 +96,10 @@ def check_kafka_connection():
     try:
         consumer = KafkaConsumer(bootstrap_servers=app.config['KAFKA_BOOTSTRAP_SERVERS'])
         consumer.topics()
+        app.logger.info("Успешное подключение к Kafka")
         return True
     except Exception as e:
-        app.logger.error(f"Kafka connection error: {str(e)}")
+        app.logger.error(f"Ошибка подключения к Kafka: {str(e)}")
         return False
 
 
@@ -162,6 +166,19 @@ def start_stock_consumer():
             app.logger.info("Connected to Kafka stock topic")
 
             for message in consumer:
+                try:
+                    stock_data = message.value
+                    if not isinstance(stock_data, dict):
+                        raise ValueError(f"Invalid stock data format: {type(stock_data)}")
+
+                    with stock_lock:
+                        for warehouse_id, items in stock_data.items():
+                            warehouse_stock[warehouse_id] = {
+                                str(item.get('pgd_id')): item.get('quantity', 0)
+                                for item in items if 'pgd_id' in item and 'quantity' in item
+                            }
+                except Exception as e:
+                    print(f'loger_start_stock_cons' +  str(e))
                 with stock_lock:
                     for warehouse_id, items in message.value.items():
                         # Преобразовываем ID товаров к строке
@@ -169,7 +186,7 @@ def start_stock_consumer():
                             str(item['pgd_id']): item['quantity']
                             for item in items
                         }
-                        app.logger.info(f"Updated stock for warehouse: {warehouse}")
+                        app.logger.info(f"Updated stock for warehouse: {warehouse_id}")
 
         except Exception as e:
             app.logger.error(f"Stock consumer error: {str(e)}")
@@ -181,58 +198,98 @@ def load_user(user_id):
     return db.session.get(User, int(user_id))
 
 
+# @app.route('/')
+# @login_required
+# def index():
+#     try:
+#         section = request.args.get('section', 'products')
+#         selected_wh = request.args.get('warehouse', 'all')
+#         with products_cache_lock:
+#             products = [p.copy() for p in products_cache]
+#
+#         with stock_lock:
+#             if selected_wh != 'all':
+#                 stock = warehouse_stock.get(selected_wh, {})
+#                 filtered_products = [
+#                     p for p in products
+#                     if str(p.get('id', '')) in stock  # Двойное преобразование
+#                 ]
+#             else:
+#                 filtered_products = products
+#
+#         return render_template(
+#             'index.html',
+#             section=section,
+#             products=filtered_products,
+#             warehouses=warehouse_manager.get_active_warehouses(),
+#             selected_wh=selected_wh,
+#             invoices=get_filtered_invoices(selected_wh)  # Передаем правильные данные
+#         )
+#     except Exception as e:
+#         app.logger.error(f"Index page error: {str(e)}")
+#         return render_template('error.html'), 500
+
 @app.route('/')
 @login_required
 def index():
-    section = request.args.get('section', 'products')
-    selected_wh = request.args.get('warehouse', 'all')
+    try:
+        section = request.args.get('section', 'products')
+        selected_wh = request.args.get('warehouse', 'all')
 
-    with products_cache_lock:
-        # Делаем глубокую копию для безопасности
-        products = [p.copy() for p in products_cache]
+        # Добавляем логирование
+        app.logger.info(f"Available warehouses: {warehouse_online_mgr.get_warehouses()}")
 
-    with stock_lock:
-        if selected_wh != 'all':
-            # Фильтруем товары для выбранного склада
-            stock = warehouse_stock.get(selected_wh, {})
-            filtered_products = [
-                p for p in products
-                if stock.get(str(p['id']), 0) > 0  # Явное преобразование к строке
-            ]
-        else:
-            # Показываем все товары из PGD
-            filtered_products = products
+        with products_cache_lock:
+            products = [p.copy() for p in products_cache]
 
-    # invoices = get_filtered_invoices(request.args.get('warehouse', 'all'))
-    # # Добавьте проверку:
-    # for invoice in invoices:
-    #     if not hasattr(invoice, 'items'):
-    #         invoice['items'] = []  # Или другое значение по умолчанию
+        with stock_lock:
+            if selected_wh != 'all':
+                stock = warehouse_stock.get(selected_wh, {})
+                filtered_products = [
+                    p for p in products
+                    if str(p.get('id', '')) in stock  # Двойное преобразование
+                ]
+            else:
+                filtered_products = products
 
-    return render_template(
-        'index.html',
-        section=section,
-        products=filtered_products,
-        warehouses=warehouse_manager.get_active_warehouses(),
-        selected_wh=selected_wh,
-        invoices=get_filtered_invoices(selected_wh)  # Передаем правильные данные
-    )
+        warehouses_data = warehouse_online_mgr.get_warehouses()
+        app.logger.info(f"Warehouses data for template: {warehouses_data}")
+
+        return render_template(
+            'index.html',
+            section=section,
+            products=filtered_products,
+            warehouses=warehouses_data,  # Используем обновленный метод
+            selected_wh=selected_wh,
+            invoices=get_filtered_invoices(selected_wh)
+        )
+    except Exception as e:
+        app.logger.error(f"Index error: {str(e)}")
+        return "Произошла ошибка сервера. Попробуйте позже.", 500
 
 
 def get_filtered_invoices(selected_wh):
-    return [
-        {
-            'type': 'arrival',
-            'sender': 'WHAAAAAARUS060ru00000001',
-            'receiver': 'WHBBBBBBRUS060ru00000002',
-            'status': 'completed',
-            'items': [  # Явно указываем список товаров
-                {'name': 'Тестовый товар 1', 'quantity': 10},
-                {'name': 'Тестовый товар 2', 'quantity': 5}
-            ],
-            'timestamp': datetime.utcnow().isoformat()
-        }
-    ]
+    with invoices_cache_lock:
+        return [
+            {
+                'id': inv.get('id', 'N/A'),  # Используем get с значением по умолчанию
+                'type': inv.get('type'),
+                'sender': inv.get('sender'),
+                'receiver': inv.get('receiver'),
+                'status': inv.get('status'),
+                'items': [
+                    {
+                        'name': f"Товар {item.get('id', '?')}",  # Защита от отсутствия id
+                        'quantity': item.get('quantity', 0)
+                    } for item in inv.get('items', [])
+                ],
+                'timestamp': inv.get('timestamp')
+            }
+            for inv in invoices_cache
+            if selected_wh == 'all'
+            or inv.get('sender') == selected_wh
+            or inv.get('receiver') == selected_wh
+        ]
 
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -343,34 +400,59 @@ class WarehouseManager:
         self.consumer_thread.start()
 
     def _consume_updates(self):
-        consumer = KafkaConsumer(
-            app.config['KAFKA_WH_REGISTRY_TOPIC'],
-            bootstrap_servers=app.config['KAFKA_BOOTSTRAP_SERVERS'],
-            value_deserializer=lambda x: json.loads(x.decode('utf-8')),
-            group_id='wi-warehouse-group'
-        )
+        while True:
+            consumer = None
+            try:
+                consumer = KafkaConsumer(
+                    app.config['KAFKA_WH_REGISTRY_TOPIC'],
+                    bootstrap_servers=app.config['KAFKA_BOOTSTRAP_SERVERS'],
+                    value_deserializer=lambda x: json.loads(x.decode('utf-8')),
+                    group_id='wi-warehouse-group-v2'
+                )
+                app.logger.info(f"Подписан на топик: {app.config['KAFKA_WH_REGISTRY_TOPIC']}")
 
-        for message in consumer:
-            with self.lock:
-                data = message.value
-                self.warehouses[data['wh_id']] = {
-                    'status': data['status'],
-                    'metadata': data.get('metadata', {}),
-                    'last_seen': datetime.utcnow()
-                }
-                self._cleanup_inactive()
+                for message in consumer:
+                    try:
+                        data = message.value
+                        if not isinstance(data, dict):
+                            raise ValueError("Invalid warehouse data format")
+
+                        self.warehouses[data['wh_id']] = {
+                            'status': data.get('status', 'unknown'),
+                            'metadata': data.get('metadata', {}),
+                            'last_seen': datetime.now(timezone.utc)
+                        }
+                    except Exception as e:
+                        app.logger.error(f"Invalid warehouse message: {str(e)}")
+
+                    # with stock_lock:
+                    #     for warehouse_id, items in message.value.items():
+                    #         # Преобразование pgd_id в строку и логирование
+                    #         app.logger.info(f"Processing stock items: {items}")
+                    #         warehouse_stock[warehouse_id] = {
+                    #             str(item['pgd_id']): item['quantity']  # Гарантированное преобразование в строку
+                    #             for item in items
+                    #         }
+                        #self._cleanup_inactive()
+
+            except Exception as e:
+                app.logger.error(f"Ошибка потребителя складов: {str(e)}")
+                time.sleep(5)
+            finally:
+                if consumer:
+                    consumer.close()
 
     def _cleanup_inactive(self):
-        cutoff = datetime.utcnow() - timedelta(minutes=5)
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=5)  # Aware datetime
         inactive = [wh_id for wh_id, wh in self.warehouses.items()
                     if wh['last_seen'] < cutoff]
-        for wh_id in inactive:
-            del self.warehouses[wh_id]
+        #for wh_id in inactive:
+        #    del self.warehouses[wh_id]
 
     def get_active_warehouses(self):
         with self.lock:
             return [
-                {**wh, 'wh_id': wh_id}
+                {'wh_id': wh_id, **wh}
                 for wh_id, wh in self.warehouses.items()
                 if wh['status'] == 'active'
             ]
@@ -400,20 +482,150 @@ def start_invoice_updates_consumer():
                 'invoice_updates',
                 bootstrap_servers=app.config['KAFKA_BOOTSTRAP_SERVERS'],
                 value_deserializer=lambda x: json.loads(x.decode('utf-8')),
-                group_id='wi-invoice-group'
+                group_id='wi-invoice-group-v2'
             )
-
-            app.logger.info("Connected to invoice updates topic")
-
             for message in consumer:
-                with app.app_context():
+                try:
                     invoice = message.value
-                    if not isinstance(invoice.get('items', []), list):
-                        invoice['items'] = []  # Здесь можно сохранять в БД WI или обновлять кэш
+                    if not isinstance(invoice, dict):
+                        raise ValueError("Invoice is not a dictionary")
 
+                    if 'id' not in invoice:
+                        app.logger.warning("Invoice missing ID: %s", invoice)
+                        continue
+
+                    #with invoices_cache_lock:
+                # Логика обновления кэша
+                except Exception as e:
+                    app.logger.error(f"Invoice processing failed: {str(e)}")
         except Exception as e:
             app.logger.error(f"Invoice consumer error: {str(e)}")
             time.sleep(5)
+# def start_invoice_updates_consumer():
+#     while True:
+#         try:
+#             consumer = KafkaConsumer(
+#                 app.config['KAFKA_STOCK_TOPIC'],
+#                 bootstrap_servers=app.config['KAFKA_BOOTSTRAP_SERVERS'],
+#                 value_deserializer=lambda x: json.loads(x.decode('utf-8')),
+#                 group_id='wi-stock-group-v2',  # Новый group_id для сброса офсетов
+#                 auto_offset_reset='earliest'
+#             )
+#
+#             for message in consumer:
+#                 with invoices_cache_lock:
+#                     invoice = message.value
+#                     # Обновляем или добавляем накладную
+#                     existing = next((i for i in invoices_cache if i['id'] == invoice['id']), None)
+#                     if existing:
+#                         existing.update(invoice)
+#                     else:
+#                         invoices_cache.append(invoice)
+#
+#         except Exception as e:
+#             app.logger.error(f"Invoice consumer error: {str(e)}")
+#             time.sleep(5)
+
+
+class WarehouseOnlineManager:
+    def __init__(self):
+        self.active_warehouses = {}
+        self.lock = threading.Lock()
+        self.consumer = KafkaConsumer(
+            Config.KAFKA_WAREHOUSES_ONLINE_TOPIC,
+            bootstrap_servers=Config.KAFKA_BOOTSTRAP_SERVERS,
+            value_deserializer=lambda x: json.loads(x.decode('utf-8')),
+            group_id='wi-warehouse-online-v3',
+            auto_offset_reset='earliest'
+        )
+        self.thread = threading.Thread(
+            target=self.update_warehouses,
+            daemon=True
+        )
+        self.thread.start()
+
+    def update_warehouses(self):
+        for message in self.consumer:
+            try:
+                data = message.value
+                wh_id = data.get('wh_id')
+
+                # Добавляем обработку отсутствующего timestamp
+                timestamp_str = data.get('timestamp')
+                timestamp = datetime.fromisoformat(timestamp_str) if timestamp_str else datetime.utcnow()
+
+                if not wh_id:
+                    raise ValueError("Missing warehouse ID in message")
+
+                with self.lock:
+                    self.active_warehouses[wh_id] = {
+                        'last_seen': datetime.now(timezone.utc),
+                        'timestamp': timestamp
+                    }
+                    app.logger.debug(f"Updated warehouse: {wh_id}")
+                    print(f"we know: {wh_id}")  # Для быстрой отладки
+
+            except Exception as e:
+                app.logger.error(f"Warehouse online error: {str(e)}")
+                app.logger.debug(f"Problematic message: {message.value}")
+
+    def get_warehouses(self):
+        with self.lock:
+            now = datetime.now(timezone.utc)
+            return [
+                {'wh_id': wh_id}  # Возвращаем словари вместо строк
+                for wh_id, data in self.active_warehouses.items()
+                if (now - data['last_seen']).total_seconds() < 20
+            ]
+
+class GoodsResponseHandler:
+    """Обработчик ответов с товарами склада"""
+    def __init__(self):
+        self.goods_cache = {}
+        self.consumer = KafkaConsumer(
+            Config.KAFKA_GOODS_RESPONSE_TOPIC,
+            bootstrap_servers=Config.KAFKA_BOOTSTRAP_SERVERS,
+            value_deserializer=lambda x: json.loads(x.decode('utf-8')),
+            group_id='wi-goods-response'
+        )
+        self.thread = threading.Thread(
+            target=self.process_responses,
+            daemon=True
+        )
+        self.thread.start()
+
+    def process_responses(self):
+        for message in self.consumer:
+            try:
+                data = message.value
+                self.goods_cache[data['wh_id']] = data['goods']             # !!!!
+            except Exception as e:
+                app.logger.error(f"Goods response error: {str(e)}")
+
+    def get_goods(self, wh_id):
+        return self.goods_cache.get(wh_id, [])
+
+
+
+@app.route('/get_warehouse_goods', methods=['POST'])
+@login_required
+def get_warehouse_goods():
+    wh_id = request.json.get('wh_id')
+    if wh_id:
+        # Отправляем запрос в Kafka
+        producer.send(Config.KAFKA_GOODS_REQUEST_TOPIC, {
+            'wh_id': wh_id,
+            'command': 'get_all_goods'
+        })
+        producer.flush()
+        return {'status': 'request_sent'}
+    return {'status': 'error'}
+
+@app.route('/current_goods')
+@login_required
+def current_goods():
+    wh_id = request.args.get('wh_id')
+    return {'goods': goods_handler.get_goods(wh_id)}
 
 
 def create_admin():
@@ -425,14 +637,17 @@ def create_admin():
             db.session.commit()
             print("Admin user created!")
 
-
 if __name__ == '__main__':
     if check_kafka_connection():
         threading.Thread(target=start_kafka_consumer, daemon=True).start()
         threading.Thread(target=start_stock_consumer, daemon=True).start()
         threading.Thread(target=start_invoice_updates_consumer, daemon=True).start()
+
     else:
         app.logger.error("Failed to connect to Kafka")
+
+    warehouse_online_mgr = WarehouseOnlineManager()
+    goods_handler = GoodsResponseHandler()
 
     with app.app_context():
         db.create_all()
