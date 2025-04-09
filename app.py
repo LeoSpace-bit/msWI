@@ -229,6 +229,26 @@ def load_user(user_id):
 #         app.logger.error(f"Index page error: {str(e)}")
 #         return render_template('error.html'), 500
 
+
+def greet_warehouse(wh_id):
+    """Функция приветствия склада с запросом товаров"""
+    print(f"Привет, склад {wh_id}! Запрашиваем список товаров...")
+
+    # Отправка запроса в Kafka
+    try:
+        producer.send(
+            app.config['KAFKA_GOODS_REQUEST_TOPIC'],
+            {
+                'wh_id': wh_id,
+                'command': 'get_all_goods',
+                'timestamp': datetime.now(timezone.utc).isoformat()
+            }
+        )
+        producer.flush()
+    except Exception as e:
+        app.logger.error(f"Ошибка отправки запроса товаров: {str(e)}")
+
+
 @app.route('/')
 @login_required
 def index():
@@ -244,11 +264,13 @@ def index():
 
         with stock_lock:
             if selected_wh != 'all':
-                stock = warehouse_stock.get(selected_wh, {})
-                filtered_products = [
-                    p for p in products
-                    if str(p.get('id', '')) in stock  # Двойное преобразование
-                ]
+                greet_warehouse(selected_wh)
+
+                # stock = warehouse_stock.get(selected_wh, {})
+                # filtered_products = [
+                #     p for p in products
+                #     if str(p.get('id', '')) in stock  # Двойное преобразование
+                # ]
             else:
                 filtered_products = products
 
@@ -412,18 +434,15 @@ class WarehouseManager:
                 app.logger.info(f"Подписан на топик: {app.config['KAFKA_WH_REGISTRY_TOPIC']}")
 
                 for message in consumer:
-                    try:
-                        data = message.value
-                        if not isinstance(data, dict):
-                            raise ValueError("Invalid warehouse data format")
-
-                        self.warehouses[data['wh_id']] = {
-                            'status': data.get('status', 'unknown'),
-                            'metadata': data.get('metadata', {}),
-                            'last_seen': datetime.now(timezone.utc)
-                        }
-                    except Exception as e:
-                        app.logger.error(f"Invalid warehouse message: {str(e)}")
+                    with stock_lock:
+                        for warehouse_id, items in message.value.items():
+                            # Преобразование pgd_id в строку и логирование
+                            app.logger.info(f"Processing stock items: {items}")
+                            warehouse_stock[warehouse_id] = {
+                                str(item['pgd_id']): item['quantity']  # Гарантированное преобразование в строку
+                                for item in items
+                            }
+                    self._cleanup_inactive()
 
                     # with stock_lock:
                     #     for warehouse_id, items in message.value.items():
@@ -457,9 +476,7 @@ class WarehouseManager:
                 if wh['status'] == 'active'
             ]
 
-
 warehouse_manager = WarehouseManager()
-
 
 @app.template_filter('wh_formatter')
 def wh_formatter(wh):
@@ -599,13 +616,12 @@ class GoodsResponseHandler:
             try:
                 data = message.value
                 self.goods_cache[data['wh_id']] = data['goods']             # !!!!
+                print(f'DEBUG [ self.goods_cache ] = {str( self.goods_cache )}')
             except Exception as e:
                 app.logger.error(f"Goods response error: {str(e)}")
 
     def get_goods(self, wh_id):
         return self.goods_cache.get(wh_id, [])
-
-
 
 @app.route('/get_warehouse_goods', methods=['POST'])
 @login_required
