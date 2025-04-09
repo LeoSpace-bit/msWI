@@ -262,17 +262,27 @@ def index():
         with products_cache_lock:
             products = [p.copy() for p in products_cache]
 
-        with stock_lock:
-            if selected_wh != 'all':
-                greet_warehouse(selected_wh)
+        filtered_products = []
+        if selected_wh != 'all':
+            greet_warehouse(selected_wh)
 
-                # stock = warehouse_stock.get(selected_wh, {})
-                # filtered_products = [
-                #     p for p in products
-                #     if str(p.get('id', '')) in stock  # Двойное преобразование
-                # ]
-            else:
-                filtered_products = products
+            # Получаем товары склада из кэша
+            warehouse_goods = goods_handler.get_goods(selected_wh)
+            app.logger.info(f"Goods for {selected_wh}: {warehouse_goods}")
+
+            # Создаем словарь для быстрого поиска товаров
+            goods_dict = {str(item['pgd_id']): item for item in warehouse_goods}
+
+            # Формируем список товаров с информацией о количестве
+            for product in products:
+                product_id = str(product.get('id'))
+                if product_id in goods_dict:
+                    product_copy = product.copy()
+                    product_copy['quantity'] = goods_dict[product_id]['quantity']
+                    filtered_products.append(product_copy)
+        else:
+            # Для "Всех складов" показываем все товары без количества
+            filtered_products = products
 
         warehouses_data = warehouse_online_mgr.get_warehouses()
         app.logger.info(f"Warehouses data for template: {warehouses_data}")
@@ -281,7 +291,7 @@ def index():
             'index.html',
             section=section,
             products=filtered_products,
-            warehouses=warehouses_data,  # Используем обновленный метод
+            warehouses=warehouses_data,
             selected_wh=selected_wh,
             invoices=get_filtered_invoices(selected_wh)
         )
@@ -603,7 +613,8 @@ class GoodsResponseHandler:
             Config.KAFKA_GOODS_RESPONSE_TOPIC,
             bootstrap_servers=Config.KAFKA_BOOTSTRAP_SERVERS,
             value_deserializer=lambda x: json.loads(x.decode('utf-8')),
-            group_id='wi-goods-response'
+            group_id='wi-goods-response',
+            auto_offset_reset='earliest'
         )
         self.thread = threading.Thread(
             target=self.process_responses,
@@ -615,13 +626,32 @@ class GoodsResponseHandler:
         for message in self.consumer:
             try:
                 data = message.value
-                self.goods_cache[data['wh_id']] = data['goods']             # !!!!
+
+                if not isinstance(data, dict):
+                    raise ValueError("Invalid response format")
+
+                wh_id = data.get('wh_id')
+                goods = data.get('goods', [])
+
+                # Валидация структуры данных
+                valid_goods = []
+                for item in goods:
+                    if 'pgd_id' in item and 'quantity' in item:
+                        valid_goods.append({
+                            'pgd_id': int(item['pgd_id']),
+                            'quantity': int(item['quantity'])
+                        })
+
+                self.goods_cache[wh_id] = valid_goods
+
                 print(f'DEBUG [ self.goods_cache ] = {str( self.goods_cache )}')
             except Exception as e:
                 app.logger.error(f"Goods response error: {str(e)}")
 
     def get_goods(self, wh_id):
         return self.goods_cache.get(wh_id, [])
+
+
 
 @app.route('/get_warehouse_goods', methods=['POST'])
 @login_required

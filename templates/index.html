@@ -23,25 +23,33 @@
             {% for product in products %}
             <div class="col">
                 <div class="card h-100 shadow-sm">
-                    {% if product.photo_url %}
-                    <img src="{{ product.photo_url }}"
-                         class="card-img-top product-image"
-                         alt="{{ product.name }}"
-                         onerror="this.style.display='none'">
-                    {% endif %}
-                    <div class="card-body">
-                        <h5 class="card-title">{{ product.name }}</h5>
-                        <div class="d-flex justify-content-between align-items-center mb-2">
-                            <span class="h4 text-primary">{{ "%.2f"|format(product.price) }} ₽</span>
-                            {% if product.weight %}
-                            <span class="badge bg-secondary">{{ product.weight }}</span>
-                            {% endif %}
-                        </div>
-                    </div>
-                    <div class="card-footer bg-transparent">
-                        <small class="text-muted">Артикул: #{{ product.id }}</small>
-                    </div>
-                </div>
+    {% if product.photo_url %}
+    <img src="{{ product.photo_url }}"
+         class="card-img-top product-image"
+         alt="{{ product.name }}"
+         onerror="this.style.display='none'">
+    {% endif %}
+    <div class="card-body">
+        <h5 class="card-title">{{ product.name }}</h5>
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <span class="h4 text-primary">{{ "%.2f"|format(product.price) }} ₽</span>
+            {% if product.weight %}
+            <span class="badge bg-secondary">{{ product.weight }}</span>
+            {% endif %}
+        </div>
+        {% if product.quantity is defined %}
+        <div class="mt-2">
+            <span class="badge bg-success">
+                <i class="bi bi-box-seam me-1"></i>
+                На складе: {{ product.quantity }}
+            </span>
+        </div>
+        {% endif %}
+    </div>
+    <div class="card-footer bg-transparent">
+        <small class="text-muted">Артикул: #{{ product.id }}</small>
+    </div>
+</div>
             </div>
             {% endfor %}
         {% else %}
@@ -350,6 +358,24 @@ document.addEventListener('DOMContentLoaded', function() {
 </script>
 
 <style>
+    .badge.bg-success {
+    font-size: 0.9em;
+    padding: 0.5em 0.75em;
+    display: inline-flex;
+    align-items: center;
+}
+
+.bi-box-seam {
+    margin-right: 0.3em;
+}
+
+.card-footer {
+    border-top: 1px solid rgba(0,0,0,.125);
+    background: #f8f9fa;
+}
+
+
+
     .select2-container--bootstrap-5 .select2-results__option {
     padding: 0.5rem 1rem;
 }
