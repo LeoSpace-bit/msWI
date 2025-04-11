@@ -605,8 +605,10 @@ class WarehouseOnlineManager:
                 if (now - data['last_seen']).total_seconds() < 20
             ]
 
+
 class GoodsResponseHandler:
     """Обработчик ответов с товарами склада"""
+
     def __init__(self):
         self.goods_cache = {}
         self.consumer = KafkaConsumer(
@@ -626,7 +628,6 @@ class GoodsResponseHandler:
         for message in self.consumer:
             try:
                 data = message.value
-
                 if not isinstance(data, dict):
                     raise ValueError("Invalid response format")
 
@@ -643,14 +644,13 @@ class GoodsResponseHandler:
                         })
 
                 self.goods_cache[wh_id] = valid_goods
+                app.logger.info(f"Updated goods cache for {wh_id}")
 
-                print(f'DEBUG [ self.goods_cache ] = {str( self.goods_cache )}')
             except Exception as e:
                 app.logger.error(f"Goods response error: {str(e)}")
 
     def get_goods(self, wh_id):
         return self.goods_cache.get(wh_id, [])
-
 
 
 @app.route('/get_warehouse_goods', methods=['POST'])
