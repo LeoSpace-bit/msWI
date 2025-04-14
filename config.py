@@ -16,4 +16,6 @@ class Config:
     KAFKA_WAREHOUSES_ONLINE_TOPIC = 'warehouses_online'
     KAFKA_GOODS_REQUEST_TOPIC = 'warehouse_goods_request'
     KAFKA_GOODS_RESPONSE_TOPIC = 'warehouse_goods_response'
+
+    KAFKA_STATE_INVOICE_TOPIC = 'warehouse_state_invoice'
     WAREHOUSE_TIMEOUT_SEC = 20  # Таймаут активности склада
