@@ -262,12 +262,14 @@ def index():
         with products_cache_lock:
             products = [p.copy() for p in products_cache]
 
+        print(f"defub suka: {selected_wh}")
         filtered_products = []
         if selected_wh != 'all':
             greet_warehouse(selected_wh)
 
             # Получаем товары склада из кэша
             warehouse_goods = goods_handler.get_goods(selected_wh)
+            print(f"Goods for {selected_wh}: {warehouse_goods}")
             app.logger.info(f"Goods for {selected_wh}: {warehouse_goods}")
 
             # Создаем словарь для быстрого поиска товаров
@@ -285,6 +287,7 @@ def index():
             filtered_products = products
 
         warehouses_data = warehouse_online_mgr.get_warehouses()
+        print(f"Warehouses data for template: {warehouses_data}")
         app.logger.info(f"Warehouses data for template: {warehouses_data}")
 
         return render_template(
@@ -354,48 +357,69 @@ def register():
 @login_required
 def create_invoice():
     try:
+        # Извлечение базовых данных
         invoice_type = request.form.get('type')
-        sender = request.form['sender']
-        receiver = request.form['receiver']
+        operated_wh = request.form.get('operated')
 
+        # Валидация основных полей
+        if not all([invoice_type, operated_wh]):
+            flash('Заполните все обязательные поля', 'danger')
+            return redirect(url_for('index', section='tasks'))
+
+        if len(operated_wh) != 24:
+            flash('Некорректный формат идентификатора склада', 'danger')
+            return redirect(url_for('index', section='tasks'))
+
+        # Обработка товаров
         items = []
-        for key in request.form:
-            if key.startswith('items'):
-                parts = key.split('[')
-                if len(parts) == 3:
-                    idx = parts[1].split(']')[0]
-                    field = parts[2].split(']')[0]
-                    if int(idx) >= len(items):
-                        items.append({})
-                    items[int(idx)][field] = request.form[key]
+        item_indices = {k.split('[')[1].split(']')[0]
+                        for k in request.form.keys()
+                        if k.startswith('items[') and '][id]' in k}
 
-        # Валидация данных
-        if len(sender) != 24 or len(receiver) != 24:
-            raise ValueError("Некорректный формат склада")
+        for idx in item_indices:
+            try:
+                item_id = int(request.form.get(f'items[{idx}][id]'))
+                quantity = int(request.form.get(f'items[{idx}][quantity]', 0))
 
-        if sender == receiver:
-            raise ValueError("Склады отправителя и получателя совпадают")
+                if quantity <= 0:
+                    raise ValueError("Некорректное количество")
 
-        # Формируем сообщение
+                items.append({'id': item_id, 'quantity': quantity})
+
+            except (ValueError, TypeError) as e:
+                app.logger.error(f"Ошибка обработки товара: {str(e)}")
+                flash('Проверьте правильность данных товаров', 'danger')
+                return redirect(url_for('index', section='tasks'))
+
+        if not items:
+            flash('Добавьте хотя бы один товар', 'danger')
+            return redirect(url_for('index', section='tasks'))
+
+        # Формирование сообщения
         invoice_data = {
             'type': invoice_type,
-            'sender': sender,
-            'receiver': receiver,
-            'items': [{
-                'id': int(item['id']),
-                'quantity': int(item['quantity'])
-            } for item in items]
+            'operated': operated_wh,
+            'items': items,
+            'user_id': current_user.id,
+            'timestamp': datetime.now(timezone.utc).isoformat()
         }
 
-        # Отправляем в Kafka
-        producer.send('invoice_requests', invoice_data)
-        producer.flush()
+        print(f'< ><> < > <>< > DEBUG SUKA [ invoice_data ] = {invoice_data}')
 
-        flash('Накладная успешно создана', 'success')
+        # Отправка в Kafka
+        # producer.send(
+        #     app.config.get('KAFKA_INVOICE_TOPIC', 'invoice_requests'),
+        #     invoice_data
+        # )
+        # producer.flush()
+
+        flash('Накладная успешно создана!', 'success')
+        return redirect(url_for('index', section='tasks'))
+
     except Exception as e:
-        flash(f'Ошибка: {str(e)}', 'danger')
-
-    return redirect(url_for('index', section='tasks'))
+        app.logger.error(f"Ошибка создания накладной: {str(e)}")
+        flash('Внутренняя ошибка сервера', 'danger')
+        return redirect(url_for('index', section='tasks'))
 
 
 @app.route('/settings', methods=['GET', 'POST'])
@@ -576,6 +600,7 @@ class WarehouseOnlineManager:
             try:
                 data = message.value
                 wh_id = data.get('wh_id')
+                metadata = data.get('metadata', {})
 
                 # Добавляем обработку отсутствующего timestamp
                 timestamp_str = data.get('timestamp')
@@ -586,8 +611,10 @@ class WarehouseOnlineManager:
 
                 with self.lock:
                     self.active_warehouses[wh_id] = {
+                        'wh_id': wh_id,
                         'last_seen': datetime.now(timezone.utc),
-                        'timestamp': timestamp
+                        'timestamp': timestamp,
+                        'metadata': metadata  # Сохраняем metadata
                     }
                     app.logger.debug(f"Updated warehouse: {wh_id}")
                     print(f"we know: {wh_id}")  # Для быстрой отладки
@@ -600,7 +627,10 @@ class WarehouseOnlineManager:
         with self.lock:
             now = datetime.now(timezone.utc)
             return [
-                {'wh_id': wh_id}  # Возвращаем словари вместо строк
+                {
+                    'wh_id': wh_id,
+                    'metadata': data.get('metadata', {})  # Передаем metadata
+                }  # Возвращаем словари вместо строк
                 for wh_id, data in self.active_warehouses.items()
                 if (now - data['last_seen']).total_seconds() < 20
             ]

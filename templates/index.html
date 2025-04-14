@@ -66,42 +66,6 @@
     {% elif section == 'tasks' %}
     <h2 class="mb-4">Управление накладными</h2>
 
-
-
-    <div class="row mb-4">
-    <div class="col-md-6">
-        <div class="input-group">
-            <span class="input-group-text">
-                <i class="bi bi-building"></i>
-            </span>
-            <select class="form-select" id="warehouseFilterTasks">
-                <option value="all">Все склады</option>
-                {% for wh in warehouses %}
-                <option value="{{ wh.wh_id }}"
-                        {% if selected_wh == wh.wh_id %}selected{% endif %}>
-                    {{ wh | wh_formatter }}
-                    {% if wh.metadata.location %}
-                    ({{ wh.metadata.location }})
-                    {% endif %}
-                </option>
-                {% endfor %}
-            </select>
-        </div>
-    </div>
-</div>
-
-<script>
-document.getElementById('warehouseFilterTasks')?.addEventListener('change', function() {
-    const filter = this.value;
-    window.location.href = `${window.location.pathname}?section=tasks&warehouse=${filter}`;
-});
-</script>
-
-
-
-
-
-
     <div class="mb-4">
         <button type="button"
                 class="btn btn-primary"
@@ -153,7 +117,7 @@ document.getElementById('warehouseFilterTasks')?.addEventListener('change', func
                             </td>
                             <td>
                                 <div class="d-flex flex-wrap gap-2">
-                                     {% for item in invoice['items'] %}  <!-- Явное обращение к ключу словаря -->
+                                     {% for item in invoice['items'] %}
         <span class="badge bg-primary rounded-pill">
             {{ item.name }} ({{ item.quantity }})
         </span>
@@ -202,28 +166,18 @@ document.getElementById('warehouseFilterTasks')?.addEventListener('change', func
                             </div>
 
                             <div class="col-md-6">
-    <label class="form-label required">Склад-отправитель</label>
-    <select name="sender" class="form-select" required>
-        <option value="" disabled selected>Выберите склад</option>
-    {% for wh in warehouses %}
-        <option value="{{ wh.wh_id }}"
-                data-location="{{ wh.metadata.location | default('') }}">
-            {{ wh | wh_formatter }}
-            {% if wh.metadata.location %}
-                ({{ wh.metadata.location }})
-            {% endif %}
-        </option>
-    {% endfor %}
-    </select>
-</div>
-
-                            <div class="col-md-6">
-                                <label class="form-label required">Склад-получатель</label>
-                                <select name="receiver" class="form-select" required>
+                                <label class="form-label required">Оперируемый склад</label>
+                                <select name="operated" class="form-select" required>
                                     <option value="" disabled selected>Выберите склад</option>
-    {% for wh in warehouses %}
-        <option value="{{ wh.wh_id }}">{{ wh | wh_formatter }}</option>
-    {% endfor %}
+                                    {% for wh in warehouses %}
+                                    <option value="{{ wh.wh_id }}"
+                                            data-location="{{ wh.metadata.location | default('') }}">
+                                        {{ wh | wh_formatter }}
+                                        {% if wh.metadata.location %}
+                                        ({{ wh.metadata.location }})
+                                        {% endif %}
+                                    </option>
+                                    {% endfor %}
                                 </select>
                             </div>
 
@@ -231,7 +185,7 @@ document.getElementById('warehouseFilterTasks')?.addEventListener('change', func
                                 <hr class="my-4">
                                 <div class="d-flex justify-content-between align-items-center mb-3">
                                     <h6 class="mb-0">Товары в накладной</h6>
-                                    <button type="button" class="btn btn-sm btn-outline-primary" id="addItemBtn">
+                                    <button type="button" class="btn btn-sm btn-outline-primary" id="addItemBtnSUPER">
                                         <i class="bi bi-plus-lg me-2"></i>Добавить товар
                                     </button>
                                 </div>
@@ -242,7 +196,7 @@ document.getElementById('warehouseFilterTasks')?.addEventListener('change', func
                                             <select name="items[0][id]" class="form-select" required>
                                                 <option value="" disabled selected>Выберите товар</option>
                                                 {% for product in products %}
-                                                <option value="{{ product.id }}">{{ product.name }}</option>
+                                                    <option value="{{ product.id }}">{{ product.name }}</option>
                                                 {% endfor %}
                                             </select>
                                         </div>
@@ -256,7 +210,7 @@ document.getElementById('warehouseFilterTasks')?.addEventListener('change', func
                                                    placeholder="Количество">
                                         </div>
                                         <div class="col-2">
-                                            <button type="button" class="btn btn-danger btn-sm w-100" disabled>
+                                            <button type="button" class="btn btn-danger btn-sm w-100 remove-item-btn">
                                                 <i class="bi bi-trash"></i>
                                             </button>
                                         </div>
@@ -280,7 +234,11 @@ document.getElementById('warehouseFilterTasks')?.addEventListener('change', func
 
 <script>
 
-    document.getElementById('warehouseFilter').addEventListener('change', async function() {
+    document.addEventListener('DOMContentLoaded', function() {
+    const warehouseFilter = document.getElementById('warehouseFilter');
+    if (warehouseFilter) {
+        warehouseFilter.addEventListener('change', async function() {
+
     const wh_id = this.value;
 
     if (wh_id !== 'all') {
@@ -305,7 +263,7 @@ document.getElementById('warehouseFilterTasks')?.addEventListener('change', func
         // Показать все товары
         updateProductsDisplay(allProducts);
     }
-});
+    });
 
 function updateProductsDisplay(goods_ids) {
     // Логика обновления отображения товаров
@@ -314,46 +272,83 @@ function updateProductsDisplay(goods_ids) {
         card.style.display = goods_ids.includes(parseInt(product_id)) ? 'block' : 'none';
     });
 }
+    }
+});
 
 
-document.addEventListener('DOMContentLoaded', function() {
-    // Warehouse filter
-    document.getElementById('warehouseFilter')?.addEventListener('change', function() {
-        const filter = this.value;
-        window.location.href = `${window.location.pathname}?section=products&warehouse=${filter}`;
-    });
 
-    // Invoice items management
-    let itemIndex = 1;
+
+   // Invoice items management
+    document.addEventListener('DOMContentLoaded', function() {
+    const maxItems = 16;
     const container = document.getElementById('itemsContainer');
-    const template = document.querySelector('.item-row').cloneNode(true);
+    const addButton = document.getElementById('addItemBtnSUPER');
 
-    document.getElementById('addItemBtn')?.addEventListener('click', function() {
-        const newRow = template.cloneNode(true);
-        const inputs = newRow.querySelectorAll('select, input');
+    if (!addButton) {
+        console.error('Кнопка addItemBtnSUPER не найдена!');
+        return;
+    }
 
-        // Update names and IDs
-        inputs.forEach(input => {
-            const name = input.name.replace('[0]', `[${itemIndex}]`);
-            input.name = name;
-            input.value = input.tagName === 'SELECT' ? '' : '1';
-        });
+    // Добавление новой строки
+    addButton.addEventListener('click', function() {
+        const itemRows = container.getElementsByClassName('item-row');
 
-        // Enable delete button
-        const deleteBtn = newRow.querySelector('button');
-        deleteBtn.disabled = false;
-        deleteBtn.addEventListener('click', () => newRow.remove());
+        console.log('Кнопка добавления нажата!', { currentItems: container.childElementCount, maxItems });
 
-        container.appendChild(newRow);
-        itemIndex++;
+        if (itemRows.length >= maxItems) return;
+
+        const newIndex = itemRows.length;
+        const template = itemRows[0].cloneNode(true);
+
+        // Обновление имен полей
+        template.querySelector('select').name = `items[${newIndex}][id]`;
+        template.querySelector('input').name = `items[${newIndex}][quantity]`;
+
+        // Сброс значений
+        template.querySelector('select').selectedIndex = 0;
+        template.querySelector('input').value = 1;
+
+        container.appendChild(template);
+        updateRemoveButtons();
+        toggleAddButton(itemRows.length + 1);
     });
 
-    // Delete item handler
+    // Удаление строки
     container.addEventListener('click', function(e) {
-        if (e.target.closest('button')) {
-            e.target.closest('.item-row').remove();
+        if (e.target.closest('.remove-item-btn')) {
+            const row = e.target.closest('.item-row');
+            if (container.childElementCount > 1) {
+                row.remove();
+                reindexItems();
+                toggleAddButton(container.childElementCount);
+            }
         }
     });
+
+    // Переиндексация оставшихся элементов
+    function reindexItems() {
+        Array.from(container.children).forEach((row, index) => {
+            row.querySelector('select').name = `items[${index}][id]`;
+            row.querySelector('input').name = `items[${index}][quantity]`;
+        });
+    }
+
+    // Активация/деактивация кнопки добавления
+    function toggleAddButton(currentCount) {
+        addButton.disabled = currentCount >= maxItems;
+    }
+
+    // Обновление состояния кнопок удаления
+    function updateRemoveButtons() {
+        const rows = container.getElementsByClassName('item-row');
+        Array.from(rows).forEach(row => {
+            row.querySelector('.remove-item-btn').disabled = rows.length <= 1;
+        });
+    }
+
+    // Инициализация
+    updateRemoveButtons();
+    toggleAddButton(container.childElementCount);
 });
 </script>
 
@@ -421,8 +416,45 @@ document.addEventListener('DOMContentLoaded', function() {
     font-weight: 500;
 }
 
-.item-row:not(:last-child) {
-    margin-bottom: 0.75rem;
+.item-row {
+    transition: opacity 0.3s ease;
+}
+
+.item-row:hover {
+    background: rgba(0, 0, 0, 0.03);
+}
+
+.product-select[disabled] {
+    background-color: #f8f9fa;
+    opacity: 0.7;
+}
+
+.ajax-loading {
+    position: relative;
+    pointer-events: none;
+}
+
+.ajax-loading::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 20px;
+    height: 20px;
+    border: 2px solid #f3f3f3;
+    border-top: 2px solid #3498db;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: translate(-50%, -50%) rotate(0deg); }
+    100% { transform: translate(-50%, -50%) rotate(360deg); }
+}
+
+.form-select[disabled] {
+    background-color: #e9ecef;
+    opacity: 1;
 }
 
 .required::after {
@@ -430,6 +462,17 @@ document.addEventListener('DOMContentLoaded', function() {
     color: #dc3545;
     margin-left: 0.25rem;
 }
+
+.modal-content {
+    border-radius: 0.5rem;
+    box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
+}
+
+.product-option {
+    display: flex;
+    justify-content: space-between;
+}
+
 
 @media (max-width: 768px) {
     .product-image {
