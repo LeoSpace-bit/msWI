@@ -163,7 +163,7 @@ class GoodsResponseHandler:
         return self.goods_cache.get(wh_id, [])
 
 
-# TODO: полученное отрисовать на сайте во вкладке Tasks
+# TODO: Улучшить отрисовку
 class WarehouseStateInvoice:
     def __init__(self):
         self.state_invoices = {}
@@ -482,9 +482,9 @@ def index():
         with products_cache_lock:
             all_products = [p.copy() for p in products_cache]
 
-        print(f"defub selected_wh: {selected_wh}")
-        print(f"defub state_invoices: {warehouse_state_invoice.state_invoices}")
-        print(f"defub all_products: {all_products}")
+        print(f"defub | selected_wh: {selected_wh}")
+        print(f"defub | state_invoices: {warehouse_state_invoice.state_invoices}")
+        print(f"defub | all_products: {all_products}")
         filtered_products = []
         if selected_wh != 'all':
             greet_warehouse(selected_wh)
