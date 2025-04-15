@@ -75,70 +75,42 @@
         </button>
     </div>
 
+    <div>
+        <select id="warehouse-select-for-invoices">
+                    <option value="all">Выберите склад</option>
+
+                    {% for warehouse_id in invoices.keys() %}
+                        <option value="{{ warehouse_id }}">{{ warehouse_id }}</option>
+                    {% endfor %}
+        </select>
+    </div>
+
+
     <div class="card border-0 shadow">
         <div class="card-body p-0">
             <div class="table-responsive">
+
+
+
+
                 <table class="table table-hover align-middle mb-0">
-                    <thead class="bg-light">
-                        <tr>
+    <thead class="bg-light">
+        <!-- Заголовки таблицы -->
+    <tr>
                             <th class="ps-4">Тип</th>
                             <th>Отправитель</th>
                             <th>Получатель</th>
                             <th>Статус</th>
-                            <th>Товары</th>
+                            <th>Товары | арт.(кол-во)</th>
                             <th class="pe-4">Дата</th>
                         </tr>
-                    </thead>
-                    <tbody id="invoicesTable">
-                        {% for invoice in invoices %}
-                        {% if invoice.items is defined and invoice.items is not none %}
-                            <tr class="position-relative">
-                            <td class="ps-4 text-uppercase fw-bold">
-                                {{ invoice.type | replace("_", " ") }}
-                            </td>
-                            <td>
-                                <span class="wh-id">
-                                    {{ invoice.sender | wh_formatter }}
-                                </span>
-                            </td>
-                            <td>
-                                <span class="wh-id">
-                                    {{ invoice.receiver | wh_formatter }}
-                                </span>
-                            </td>
-                            <td>
-                                <span class="badge rounded-pill bg-{{
-                                    'success' if invoice.status == 'completed'
-                                    else 'warning' if invoice.status == 'shipping'
-                                    else 'danger'
-                                }}">
-                                    {{ invoice.status | upper }}
-                                </span>
-                            </td>
-                            <td>
-                                <div class="d-flex flex-wrap gap-2">
-                                     {% for item in invoice['items'] %}
-        <span class="badge bg-primary rounded-pill">
-            {{ item.name }} ({{ item.quantity }})
-        </span>
-        {% endfor %}
-                                </div>
-                            </td>
-                            <td class="pe-4">
-                                {{ invoice.timestamp | datetimeformat }}
-                            </td>
-                        </tr>
-                        {% endif %}
-                        {% else %}
-                        <tr>
-                            <td colspan="6" class="text-center py-5">
-                                <i class="bi bi-inboxes display-4 text-muted"></i>
-                                <h5 class="mt-3">Нет активных накладных</h5>
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
+    </thead>
+    <tbody id="invoicesTable" > <!-- class="ajax-loading" -->
+        <!-- Данные будут добавлены через JavaScript -->
+    </tbody>
+</table>
+
+
             </div>
         </div>
     </div>
@@ -349,10 +321,93 @@ function updateProductsDisplay(goods_ids) {
     // Инициализация
     updateRemoveButtons();
     toggleAddButton(container.childElementCount);
+
+
+    // Таблица заявок
+
+    // Добавляем обработчик для селектора склада
+    const warehouseSelect = document.getElementById('warehouse-select-for-invoices');
+    if (warehouseSelect) {
+        warehouseSelect.addEventListener('change', async function() {
+        const selectedWh = this.value;
+        if (!selectedWh) return;
+
+        const response = await fetch(`/get_invoices?warehouse_id=${selectedWh}`);
+        const data = await response.json();
+
+        // Исправленный селектор:
+        const tbody = document.getElementById('invoicesTable'); // Было: #invoicesTable tbody
+        if (!tbody) { // Проверка на существование элемента
+            console.error("Таблица invoicesTable не найдена!");
+            return;
+        }
+
+        tbody.innerHTML = '';
+
+
+            // Заполняем таблицу новыми данными
+            if (data && data.invoices) {
+                data.invoices.forEach(invoice => {
+                    const row = `
+                        <tr class="position-relative">
+                            <td class="ps-4 text-uppercase fw-bold">
+                                ${invoice.type.replace('_', ' ')}
+                            </td>
+                            <td>
+                                <span class="wh-id">${invoice.sender}</span>
+                            </td>
+                            <td>
+                                <span class="wh-id">${invoice.receiver}</span>
+                            </td>
+                            <td>
+                                <span class="badge rounded-pill bg-${
+                                    invoice.status === 'completed' ? 'success' :
+                                    invoice.status === 'shipping' ? 'warning' : 'danger'
+                                }">${invoice.status.toUpperCase()}</span>
+                            </td>
+                            <td>
+                                <div class="d-flex flex-wrap gap-2">
+                                    ${invoice.items.map(item =>
+                                        `<span class="badge bg-primary rounded-pill">${item.pgd_id} (x${item.quantity})</span>`
+                                    ).join('')}
+                                </div>
+                            </td>
+                            <td class="pe-4">${new Date(invoice.created_at).toLocaleString()}</td>
+                        </tr>
+                    `;
+                    tbody.insertAdjacentHTML('beforeend', row);
+                });
+            }
+        });
+    }
 });
+
 </script>
 
 <style>
+
+    .ajax-loading {
+    position: relative;
+}
+.ajax-loading::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 20px;
+    height: 20px;
+    border: 2px solid #f3f3f3;
+    border-top: 2px solid #3498db;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+
+
     .badge.bg-success {
     font-size: 0.9em;
     padding: 0.5em 0.75em;
