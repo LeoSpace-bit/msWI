@@ -21,7 +21,7 @@
     <div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4">
         {% if products %}
             {% for product in products %}
-            <div class="col">
+            <div class="col" data-product-id="{{ product.id }}">
                 <div class="card h-100 shadow-sm">
     {% if product.photo_url %}
     <img src="{{ product.photo_url }}"
@@ -237,13 +237,28 @@
     }
     });
 
-function updateProductsDisplay(goods_ids) {
-    // Логика обновления отображения товаров
-    document.querySelectorAll('.product-card').forEach(card => {
-        const product_id = card.dataset.productId;
-        card.style.display = goods_ids.includes(parseInt(product_id)) ? 'block' : 'none';
+//function updateProductsDisplay(goods_ids) {
+//    // Логика обновления отображения товаров
+//    document.querySelectorAll('.product-card').forEach(card => {
+//        const product_id = card.dataset.productId;
+//        card.style.display = goods_ids.includes(parseInt(product_id)) ? 'block' : 'none';
+//    });
+//}
+
+function updateProductsDisplay(goodsIds) {
+    const productIdSet = new Set(goodsIds); // Создаем Set для быстрого поиска
+    document.querySelectorAll('.col').forEach(col => {
+        const productCard = col.querySelector('.card');
+        const productId = productCard.dataset.productId;
+        if (productId && productIdSet.has(productId)) {
+            col.style.display = 'block';
+        } else {
+            col.style.display = 'none';
+        }
     });
 }
+
+
     }
 });
 

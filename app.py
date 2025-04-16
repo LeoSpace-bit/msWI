@@ -25,8 +25,8 @@ app = Flask(__name__)
 app.config.from_object('config.Config')
 
 #kafka
-products_cache = []
-products_cache_lock = threading.Lock()  # Добавляем блокировку
+#products_cache = []
+#products_cache_lock = threading.Lock()  # Добавляем блокировку
 warehouse_stock = defaultdict(dict)
 stock_lock = threading.Lock()
 #active_warehouses = set()
@@ -149,7 +149,7 @@ class GoodsResponseHandler:
                 for item in goods:
                     if 'pgd_id' in item and 'quantity' in item:
                         valid_goods.append({
-                            'pgd_id': int(item['pgd_id']),
+                            'pgd_id': str(item['pgd_id']),
                             'quantity': int(item['quantity'])
                         })
 
@@ -271,6 +271,52 @@ class WarehouseStateInvoice:
 
 
 
+
+
+class ProductsResponseHandler:
+    """Обработчик ответов с товарами """
+
+    def __init__(self):
+        self.products_cache = {}
+        self.lock = threading.Lock()
+        self.consumer = KafkaConsumer(
+            app.config['KAFKA_PRODUCT_TOPIC'],
+            bootstrap_servers=app.config['KAFKA_BOOTSTRAP_SERVERS'],
+            auto_offset_reset='latest',
+            value_deserializer=lambda x: json.loads(x.decode('utf-8')),
+            group_id='wi-consumer-group',
+            enable_auto_commit=True,
+            session_timeout_ms=30000,
+            max_poll_interval_ms=300000,
+            consumer_timeout_ms=10000
+        )
+        self.thread = threading.Thread(
+            target=self.process_responses,
+            daemon=True
+        )
+        self.thread.start()
+        app.logger.info("Kafka consumer connected. Waiting for messages...")
+
+    def process_responses(self):
+        for message in self.consumer:
+            try:
+                products = message.value
+                if not isinstance(products, list):
+                    raise ValueError("Invalid message format")
+
+                app.logger.info(f"Received {len(products)} products")
+
+                with self.lock:
+                    self.products_cache.clear()
+                    self.products_cache = products
+
+            except Exception as e:
+                app.logger.error(f"Error processing message: {str(e)}")
+
+
+
+
+
 @app.template_filter('datetimeformat')
 def datetimeformat_filter(value, format='%d.%m.%Y %H:%M'):
     try:
@@ -323,51 +369,53 @@ def check_kafka_connection():
         return False
 
 
-def start_kafka_consumer():
-    while True:
-        consumer = None
-        try:
-            consumer = KafkaConsumer(
-                app.config['KAFKA_PRODUCT_TOPIC'],
-                bootstrap_servers=app.config['KAFKA_BOOTSTRAP_SERVERS'],
-                auto_offset_reset='latest',
-                value_deserializer=lambda x: json.loads(x.decode('utf-8')),
-                group_id='wi-consumer-group',
-                enable_auto_commit=True,
-                session_timeout_ms=30000,
-                max_poll_interval_ms=300000,
-                consumer_timeout_ms=10000
-            )
 
-            app.logger.info("Kafka consumer connected. Waiting for messages...")
-
-            for message in consumer:
-                try:
-                    products = message.value
-                    if not isinstance(products, list):
-                        raise ValueError("Invalid message format")
-
-                    app.logger.info(f"Received {len(products)} products")
-
-                    with products_cache_lock:
-                        products_cache.clear()
-                        products_cache.extend(products)
-
-                except Exception as e:
-                    app.logger.error(f"Error processing message: {str(e)}")
-
-        except (KafkaError, NoBrokersAvailable) as e:
-            app.logger.error(f"Kafka connection error: {str(e)}. Retrying in 5 seconds...")
-            time.sleep(5)
-        except Exception as e:
-            app.logger.error(f"Unexpected error: {str(e)}")
-            time.sleep(5)
-        finally:
-            if consumer:
-                try:
-                    consumer.close()
-                except:
-                    pass
+#TODO здесь читаются картинки
+#def start_kafka_consumer():
+    # while True:
+    #     consumer = None
+    #     try:
+    #         consumer = KafkaConsumer(
+    #             app.config['KAFKA_PRODUCT_TOPIC'],
+    #             bootstrap_servers=app.config['KAFKA_BOOTSTRAP_SERVERS'],
+    #             auto_offset_reset='latest',
+    #             value_deserializer=lambda x: json.loads(x.decode('utf-8')),
+    #             group_id='wi-consumer-group',
+    #             enable_auto_commit=True,
+    #             session_timeout_ms=30000,
+    #             max_poll_interval_ms=300000,
+    #             consumer_timeout_ms=10000
+    #         )
+    #
+    #         app.logger.info("Kafka consumer connected. Waiting for messages...")
+    #
+    #         for message in consumer:
+    #             try:
+    #                 products = message.value
+    #                 if not isinstance(products, list):
+    #                     raise ValueError("Invalid message format")
+    #
+    #                 app.logger.info(f"Received {len(products)} products")
+    #
+    #                 with products_cache_lock:
+    #                     products_cache.clear()
+    #                     products_cache.extend(products)
+    #
+    #             except Exception as e:
+    #                 app.logger.error(f"Error processing message: {str(e)}")
+    #
+    #     except (KafkaError, NoBrokersAvailable) as e:
+    #         app.logger.error(f"Kafka connection error: {str(e)}. Retrying in 5 seconds...")
+    #         time.sleep(5)
+    #     except Exception as e:
+    #         app.logger.error(f"Unexpected error: {str(e)}")
+    #         time.sleep(5)
+    #     finally:
+    #         if consumer:
+    #             try:
+    #                 consumer.close()
+    #             except:
+    #                 pass
 
 
 def start_stock_consumer():
@@ -479,12 +527,12 @@ def index():
         # Добавляем логирование
         app.logger.info(f"Available warehouses: {warehouse_online_mgr.get_warehouses()}")
 
-        with products_cache_lock:
-            all_products = [p.copy() for p in products_cache]
+        all_products = [p.copy() for p in products_response.products_cache] # May be without copy
 
         print(f"defub | selected_wh: {selected_wh}")
         print(f"defub | state_invoices: {warehouse_state_invoice.state_invoices}")
         print(f"defub | all_products: {all_products}")
+        print(f"defub | get_goods: {goods_handler.get_goods(selected_wh)}")
         filtered_products = []
         if selected_wh != 'all':
             greet_warehouse(selected_wh)
@@ -495,11 +543,14 @@ def index():
             app.logger.info(f"Goods for {selected_wh}: {warehouse_goods}")
 
             # Создаем словарь для быстрого поиска товаров
-            goods_dict = {str(item['pgd_id']): item for item in warehouse_goods}
+            goods_dict = {
+                str(item['pgd_id']): item  # Преобразуем pgd_id в строку
+                for item in warehouse_goods
+            }
 
             # Формируем список товаров с информацией о количестве
             for product in all_products:
-                product_id = str(product.get('id'))
+                product_id = str(product.get('id', ''))
                 if product_id in goods_dict:
                     product_copy = product.copy()
                     product_copy['quantity'] = goods_dict[product_id]['quantity']
@@ -509,7 +560,7 @@ def index():
             filtered_products = all_products
 
         warehouses_data = warehouse_online_mgr.get_warehouses()
-        print(f"Warehouses data for template: {warehouses_data}")
+        print(f"defub | Warehouses data for template: {warehouses_data}")
         app.logger.info(f"Warehouses data for template: {warehouses_data}")
 
         return render_template(
@@ -845,7 +896,6 @@ def create_admin():
 
 if __name__ == '__main__':
     if check_kafka_connection():
-        threading.Thread(target=start_kafka_consumer, daemon=True).start()
         threading.Thread(target=start_stock_consumer, daemon=True).start()
         threading.Thread(target=start_invoice_updates_consumer, daemon=True).start()
 
@@ -855,6 +905,7 @@ if __name__ == '__main__':
     warehouse_online_mgr = WarehouseOnlineManager()
     goods_handler = GoodsResponseHandler()
     warehouse_state_invoice = WarehouseStateInvoice()
+    products_response = ProductsResponseHandler()
 
     with app.app_context():
         db.create_all()
