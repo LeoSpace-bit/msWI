@@ -207,35 +207,145 @@
 <script>
 
     document.addEventListener('DOMContentLoaded', function() {
-    const warehouseFilter = document.getElementById('warehouseFilter');
-    if (warehouseFilter) {
-        warehouseFilter.addEventListener('change', async function() {
+    const warehouseSelector = document.getElementById('warehouse-selector');
+    if (warehouseSelector) {
+        warehouseSelector.addEventListener('change', function() {
+            const selectedWh = this.value;
+            if (!selectedWh) return;
 
-    const wh_id = this.value;
-
-    if (wh_id !== 'all') {
-        // Запрашиваем товары для выбранного склада
-        await fetch('/get_warehouse_goods', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({wh_id: wh_id})
-        });
-
-        // Обновляем список товаров каждые 2 секунды пока не получим данные
-        const checkInterval = setInterval(async () => {
-            const response = await fetch(`/current_goods?wh_id=${wh_id}`);
-            const data = await response.json();
-
-            if (data.goods.length > 0) {
-                clearInterval(checkInterval);
-                updateProductsDisplay(data.goods);
+            // Показать индикатор загрузки
+            const goodsContainer = document.getElementById('goods-container');
+            if (goodsContainer) {
+                goodsContainer.innerHTML = '<p>Загрузка товаров...</p>';
             }
-        }, 2000);
-    } else {
-        // Показать все товары
-        updateProductsDisplay(allProducts);
+
+            fetch(`/current_goods?wh_id=${selectedWh}`)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Ошибка загрузки данных');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    console.log('Получены данные:', data); // Для отладки
+                    updateGoodsDisplay(data.goods || []);
+                })
+                .catch(error => {
+                    console.error('Ошибка:', error);
+                    if (goodsContainer) {
+                        goodsContainer.innerHTML = '<p>Произошла ошибка при загрузке товаров</p>';
+                    }
+                });
+        });
     }
+});
+
+//    document.addEventListener('DOMContentLoaded', function() {
+//    const warehouseFilter = document.getElementById('warehouseFilter');
+//    if (warehouseFilter) {
+//        warehouseFilter.addEventListener('change', async function() {
+//            const wh_id = this.value;
+//            if (wh_id !== 'all') {
+//                const checkInterval = setInterval(async () => {
+//                    const response = await fetch(`/current_goods?wh_id=${wh_id}`);
+//                    const data = await response.json();
+//                    if (data.goods.length > 0) {
+//                        clearInterval(checkInterval);
+//                        updateProductsDisplay(data.goods);
+//                    }
+//                }, 2000);
+//            } else {
+//                updateProductsDisplay(allProducts);
+//            }
+//        });
+//    }
+//});
+
+function updateGoodsDisplay(goods) {
+    const goodsContainer = document.getElementById('goods-container');
+    if (!goodsContainer) return;
+
+    if (!goods.length) {
+        goodsContainer.innerHTML = '<p>Нет товаров на складе</p>';
+        return;
+    }
+
+    let html = '<table class="table"><thead><tr><th>ID</th><th>Название</th><th>Количество</th><th>Описание</th></tr></thead><tbody>';
+
+    goods.forEach(item => {
+        html += `
+            <tr>
+                <td>${item.pgd_id}</td>
+                <td>${item.name || `Товар ${item.pgd_id}`}</td>
+                <td>${item.quantity}</td>
+                <td>${item.description || 'Нет описания'}</td>
+            </tr>`;
     });
+
+    html += '</tbody></table>';
+    goodsContainer.innerHTML = html;
+}
+
+//function updateProductsDisplay(goodsData) {
+//    // Создаём карту {pgd_id: quantity} для быстрого поиска
+//    const goodsMap = {};
+//    goodsData.forEach(item => {
+//        goodsMap[item.pgd_id.toString()] = item.quantity; // Преобразуем в строку для совместимости
+//    });
+
+    // Итерируемся по всем товарам на странице
+    document.querySelectorAll('.col').forEach(col => {
+        const productCard = col.querySelector('.card');
+        const productId = productCard.dataset.productId;
+
+        if (productId) {
+            const quantity = goodsMap[productId];
+            if (quantity !== undefined) {
+                col.style.display = 'block';
+                // Добавляем информацию о количестве (если нужно)
+                const quantityElement = productCard.querySelector('.badge.bg-success');
+                if (quantityElement) {
+                    quantityElement.textContent = `На складе: ${quantity}`;
+                }
+            } else {
+                col.style.display = 'none';
+            }
+        } else {
+            col.style.display = 'none';
+        }
+    });
+};
+
+//    document.addEventListener('DOMContentLoaded', function() {
+//    const warehouseFilter = document.getElementById('warehouseFilter');
+//    if (warehouseFilter) {
+//        warehouseFilter.addEventListener('change', async function() {
+//
+//    const wh_id = this.value;
+//
+//    if (wh_id !== 'all') {
+//        // Запрашиваем товары для выбранного склада
+//        await fetch('/get_warehouse_goods', {
+//            method: 'POST',
+//            headers: {'Content-Type': 'application/json'},
+//            body: JSON.stringify({wh_id: wh_id})
+//        });
+//
+//        // Обновляем список товаров каждые 2 секунды пока не получим данные
+//        const checkInterval = setInterval(async () => {
+//            const response = await fetch(`/current_goods?wh_id=${wh_id}`);
+//            const data = await response.json();
+//
+//            if (data.goods.length > 0) {
+//                clearInterval(checkInterval);
+//                updateProductsDisplay(data.goods);
+//            }
+//        }, 2000);
+//    } else {
+//        // Показать все товары
+//        updateProductsDisplay(allProducts);
+//    }
+//    });
 
 //function updateProductsDisplay(goods_ids) {
 //    // Логика обновления отображения товаров
@@ -245,25 +355,18 @@
 //    });
 //}
 
-function updateProductsDisplay(goodsIds) {
-    const productIdSet = new Set(goodsIds); // Создаем Set для быстрого поиска
-    document.querySelectorAll('.col').forEach(col => {
-        const productCard = col.querySelector('.card');
-        const productId = productCard.dataset.productId;
-        if (productId && productIdSet.has(productId)) {
-            col.style.display = 'block';
-        } else {
-            col.style.display = 'none';
-        }
-    });
-}
-
-
-    }
-});
-
-
-
+//function updateProductsDisplay(goodsIds) {
+//    const productIdSet = new Set(goodsIds); // Создаем Set для быстрого поиска
+//    document.querySelectorAll('.col').forEach(col => {
+//        const productCard = col.querySelector('.card');
+//        const productId = productCard.dataset.productId;
+//        if (productId && productIdSet.has(productId)) {
+//            col.style.display = 'block';
+//        } else {
+//            col.style.display = 'none';
+//        }
+//    });
+//};
 
    // Invoice items management
     document.addEventListener('DOMContentLoaded', function() {
