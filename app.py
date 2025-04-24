@@ -36,13 +36,14 @@ class WarehouseOnlineManager:
     def __init__(self):
         self.active_warehouses = {}
         self.lock = threading.Lock()
+        self.data_ready = threading.Event()
         self.consumer = KafkaConsumer(
             Config.KAFKA_WAREHOUSES_ONLINE_TOPIC,
             bootstrap_servers=Config.KAFKA_BOOTSTRAP_SERVERS,
             value_deserializer=lambda x: json.loads(x.decode('utf-8')),
             group_id='wi-warehouse-online-v3',
             auto_offset_reset='earliest',
-            enable_auto_commit=True,
+            enable_auto_commit=False,
             session_timeout_ms=60000,
             max_poll_interval_ms=300000
         )
@@ -59,12 +60,18 @@ class WarehouseOnlineManager:
                 print(f" === DEBUF WOM RAW DATA##: {data}")
 
                 if not data:
+                    self.consumer.commit()
                     continue
 
                 data = data.copy()
 
                 wh_id = data.get('wh_id')
                 metadata = data.get('metadata', {})
+
+                if not wh_id:
+                    app.logger.warning("WOM received message without wh_id")
+                    self.consumer.commit()
+                    continue
 
                 #self.act_wh.add(str(wh_id))
 
@@ -96,6 +103,8 @@ class WarehouseOnlineManager:
                     if current_entry is None:
                         self.active_warehouses[wh_id] = new_entry.copy()
                         print(f"  >  DEBUG None to full: {self.active_warehouses}")
+                        if not self.data_ready.is_set():  # Сигнализируем при первом успешном обновлении
+                            self.data_ready.set()
                     else:
                         # Rule 5: Обновляем только при изменении данных
                         if (current_entry['timestamp'] != new_entry['timestamp'] or
@@ -103,11 +112,13 @@ class WarehouseOnlineManager:
                             current_entry['wh_id'] != new_entry['wh_id']):
                             self.active_warehouses[wh_id] = new_entry.copy()
                             print(f"  >  DEBUG was change: {self.active_warehouses}")
+                            if not self.data_ready.is_set():  # Сигнализируем при первом успешном обновлении
+                                self.data_ready.set()
                         else:
                             # Обновляем только last_seen если данные не изменились
                             print(f"  *  DEBUG last_seen c/n: {current_entry['last_seen']} / {new_entry['last_seen']}")
                             current_entry['last_seen'] = new_entry['last_seen']
-
+                            self.active_warehouses = current_entry
 
                     # self.active_warehouses[wh_id] = {
                     #     'wh_id': wh_id,
@@ -117,9 +128,17 @@ class WarehouseOnlineManager:
                     # }
                     #print(f"we know: {wh_id}")  # Для быстрой отладки
 
+                self.consumer.commit()
+
             except Exception as e:
                 app.logger.error(f"Warehouse online error: {str(e)}")
                 app.logger.debug(f"Problematic message: {message.value}")
+                try:
+                    self.consumer.commit()
+                except Exception as commit_err:
+                    app.logger.error(f"WOM failed to commit offset after error: {commit_err}")
+
+
 
     def get_warehouses(self):
         with self.lock:
@@ -135,24 +154,20 @@ class WarehouseOnlineManager:
             print(f"  @  DEBUG WarehouseOnlineManager GET {result}")
             return result.copy()
 
-    def is_ready(self):
-        """Проверяет, есть ли хотя бы один активный склад"""
-        return bool(self.get_warehouses())
-
-
 class GoodsResponseHandler:
     """Обработчик ответов с товарами склада"""
 
     def __init__(self):
         self.goods_cache = {}
         self.lock = threading.Lock()
+        self.data_ready = threading.Event()
         self.consumer = KafkaConsumer(
             Config.KAFKA_GOODS_RESPONSE_TOPIC,
             bootstrap_servers=Config.KAFKA_BOOTSTRAP_SERVERS,
             value_deserializer=lambda x: json.loads(x.decode('utf-8')),
-            group_id='wi-goods-response-v1',
+            group_id='wi-goods-response-v2',
             auto_offset_reset='earliest',
-            enable_auto_commit=True,
+            enable_auto_commit=False,
             session_timeout_ms=120000,
             max_poll_interval_ms=3000000
         )
@@ -170,6 +185,7 @@ class GoodsResponseHandler:
                 print(f" === DEBUF GRH RAW DATA##: {data}")
 
                 if not data:
+                    self.consumer.commit()
                     continue
 
                 data = data.copy()
@@ -177,6 +193,7 @@ class GoodsResponseHandler:
                 print(f" === DEBUF GRH RAW DATA##: {data}")
                 if not isinstance(data, dict):
                     print(f"DEBUF LOG Получено некорректное сообщение: {data}")
+                    self.consumer.commit()
                     continue
 
                 wh_id = data.get('wh_id')
@@ -184,10 +201,12 @@ class GoodsResponseHandler:
 
                 if not wh_id:
                     print(f"DEBUF LOG Отсутствует ID склада в сообщении")
+                    self.consumer.commit()
                     continue
 
                 if not goods:
                     print(f"DEBUF LOG Отсутствуют товары для склада {wh_id}")
+                    self.consumer.commit()
                     continue
 
                 # Валидация структуры данных
@@ -216,19 +235,30 @@ class GoodsResponseHandler:
                     if state_goods is None:
                         self.goods_cache[wh_id] = valid_goods.copy()
                         print(f"  >  DEBUG None to full: {self.goods_cache}")
+                        if not self.data_ready.is_set():  # Сигнализируем при первом успешном обновлении
+                            self.data_ready.set()
                     else:
                         # Rule 5: Обновляем только при изменении данных
                         if state_goods != valid_goods:
                             self.goods_cache[wh_id] = valid_goods.copy()
                             print(f"  >  DEBUG was change: {self.goods_cache}")
+                            if not self.data_ready.is_set():  # Сигнализируем при первом успешном обновлении
+                                self.data_ready.set()
 
                     #self.goods_cache[wh_id] = valid_goods
                     #print(f"DEBUF-S: goods_cache[{wh_id}] = {valid_goods}")
+
+                self.consumer.commit()
 
             except StopIteration:
                 pass
             except Exception as e:
                 app.logger.error(f"Goods response error: {str(e)}")
+                try:
+                    self.consumer.commit()
+                except Exception as commit_err:
+                    app.logger.error(f"GRH failed to commit offset after error: {commit_err}")
+
 
     def get_goods(self, wh_id):
         with self.lock:
@@ -243,19 +273,19 @@ class GoodsResponseHandler:
         with self.lock:
             return any(self.goods_cache.values())
 
-
 # TODO: Улучшить отрисовку
 class WarehouseStateInvoice:
     def __init__(self):
         self.state_invoices = {}
         self.lock = threading.Lock()
+        self.data_ready = threading.Event()
         self.consumer = KafkaConsumer(
             Config.KAFKA_STATE_INVOICE_TOPIC,
             bootstrap_servers=Config.KAFKA_BOOTSTRAP_SERVERS,
             value_deserializer=lambda x: json.loads(x.decode('utf-8')),
             group_id='wi-warehouse-state-invoice-v1-abc',
             auto_offset_reset='earliest',
-            enable_auto_commit=True,
+            enable_auto_commit=False,
             consumer_timeout_ms=30000  # Увеличьте таймаут, если нужно
         )
         self.thread = threading.Thread(
@@ -319,12 +349,16 @@ class WarehouseStateInvoice:
                     if current_state is None:
                         self.state_invoices[wh_id] = new_state.copy()
                         print(f"  >  DEBUG None to full: {self.state_invoices}")
+                        if not self.data_ready.is_set():  # Сигнализируем при первом успешном обновлении
+                            self.data_ready.set()
                     else:
                         # Rule 5: Обновляем только при изменении данных (без учета last_seen)
                         if (current_state['timestamp'] != new_state['timestamp'] or
                                 current_state['invoices'] != new_state['invoices']):
                             self.state_invoices[wh_id] = new_state.copy()
                             print(f"  >  DEBUG was change: {self.state_invoices}")
+                            if not self.data_ready.is_set():  # Сигнализируем при первом успешном обновлении
+                                self.data_ready.set()
 
                     # self.state_invoices[wh_id] = {
                     #     'wh_id': wh_id,
@@ -333,6 +367,8 @@ class WarehouseStateInvoice:
                     #     'invoices': self._process_invoices(invoices)
                     # }
                     #print(f"we know: {self.state_invoices}")  # Для быстрой отладки
+
+                self.consumer.commit()
 
             except Exception as e:
                 app.logger.error(f"Warehouse update error: {str(e)}")
@@ -401,15 +437,17 @@ class ProductsResponseHandler:
     def __init__(self):
         self.products_cache = [] #{}
         self.lock = threading.Lock()
+        self.data_ready = threading.Event()
         self.consumer = KafkaConsumer(
             app.config['KAFKA_PRODUCT_TOPIC'],
             bootstrap_servers=app.config['KAFKA_BOOTSTRAP_SERVERS'],
             auto_offset_reset='earliest',
             value_deserializer=lambda x: json.loads(x.decode('utf-8')),
             group_id='wi-consumer-group-v1',
-            enable_auto_commit=True,
+            enable_auto_commit=False,
             session_timeout_ms=60000,
-            max_poll_interval_ms=300000
+            max_poll_interval_ms=300000,
+            consumer_timeout_ms=-1
         )
         self.thread = threading.Thread(
             target=self.process_responses,
@@ -424,11 +462,23 @@ class ProductsResponseHandler:
                 products = message.value
                 print(f" === DEBUF RAW DATA##: {products}")
                 if not isinstance(products, list):
-                    raise ValueError("Invalid message format")
+                    app.logger.warning(f"PRH received non-list message: {products}")
+                    self.consumer.commit()
+                    continue
 
                 if not products:  # Skip empty lists
                     print("Received empty products list, ignoring.")
+                    self.consumer.commit()
                     continue
+
+                # Валидация структуры продуктов (простая)
+                valid_products = []
+                for item in products:
+                    if isinstance(item, dict) and 'id' in item and 'name' in item:
+                        item['id'] = str(item['id'])  # Приводим ID к строке для унификации
+                        valid_products.append(item)
+                    else:
+                        app.logger.warning(f"PRH invalid product structure in message: {item}")
 
                 products = products.copy()
 
@@ -447,25 +497,31 @@ class ProductsResponseHandler:
                     if current_cache is None:  # Rule 3: Empty cache can accept non-empty
                         self.products_cache = products.copy()
                         print(f"  >  DEBUG None to full: {self.products_cache}")
+                        if not self.data_ready.is_set():  # Сигнализируем при первом успешном обновлении
+                            self.data_ready.set()
                     else:
                         if products != current_cache:  # Rule 5: Update only if different
                             self.products_cache = products.copy()
                             print(f"  >  DEBUG was change: {self.products_cache}")
+                            if not self.data_ready.is_set():  # Сигнализируем при первом успешном обновлении
+                                self.data_ready.set()
                     #self.products_cache = products.copy()
                     #print(f"DEBUF view self.products: {products}")
 
+                self.consumer.commit()
+
             except Exception as e:
                 app.logger.error(f"Error processing message : {str(e)}")
+                try:
+                    self.consumer.commit()
+                except Exception as commit_err:
+                    app.logger.error(f"PRH failed to commit offset after error: {commit_err}")
 
     def get_products(self):
         with self.lock:
             result = self.products_cache.copy()
             print(f"  @  DEBUG WarehouseOnlineManager GET {result}")
             return result
-
-    def is_ready(self):
-        with self.lock:
-            return bool(self.products_cache)
 
 
 @app.template_filter('datetimeformat')
@@ -513,6 +569,7 @@ def check_kafka_connection():
     try:
         consumer = KafkaConsumer(bootstrap_servers=app.config['KAFKA_BOOTSTRAP_SERVERS'])
         consumer.topics()
+        consumer.close()
         app.logger.info("Успешное подключение к Kafka")
         return True
     except Exception as e:
@@ -971,12 +1028,44 @@ def create_admin():
             print("Admin user created!")
 
 
-def initialize_handlers():
+def initialize_handlers(time = 120):
     if check_kafka_connection():
-        app.warehouse_online_mgr = WarehouseOnlineManager()
-        app.goods_handler = GoodsResponseHandler()
-        app.warehouse_state_invoice = WarehouseStateInvoice()
+        # ProductsResponseHandler
+        print(f"Create ProductsResponseHandler")
         app.products_response = ProductsResponseHandler()
+        try:
+            print(f"Wait ProductsResponseHandler")
+            app.products_response.data_ready.wait(time)
+        except TimeoutError:
+            print(f"Timeout of data for ProductsResponseHandler")
+
+        # WarehouseOnlineManager
+        print(f"Create WarehouseOnlineManager")
+        app.warehouse_online_mgr = WarehouseOnlineManager()
+        try:
+            print(f"Wait WarehouseOnlineManager")
+            app.warehouse_online_mgr.data_ready.wait(time)
+        except TimeoutError:
+            print(f"Timeout of data for WarehouseOnlineManager")
+
+        # WarehouseStateInvoice
+        print(f"Create WarehouseStateInvoice")
+        app.warehouse_state_invoice = WarehouseStateInvoice()
+        try:
+            print(f"Wait WarehouseStateInvoice")
+            app.warehouse_state_invoice.data_ready.wait(time)
+        except TimeoutError:
+            print(f"Timeout of data for WarehouseStateInvoice")
+
+        # GoodsResponseHandler
+        print(f"Create GoodsResponseHandler")
+        app.goods_handler = GoodsResponseHandler()
+        try:
+            print(f"Wait GoodsResponseHandler")
+            app.goods_handler.data_ready.wait(time)
+        except TimeoutError:
+            print(f"Timeout of data for GoodsResponseHandler")
+
     else:
         app.logger.error("Failed to connect to Kafka")
         sys.exit(1)
@@ -987,4 +1076,4 @@ if __name__ == '__main__':
         db.create_all()
         initialize_handlers()
     create_admin()
-    app.run(debug=True, port=5010)
+    app.run(debug=False, port=5010)
