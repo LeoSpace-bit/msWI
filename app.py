@@ -705,23 +705,23 @@ def load_user(user_id):
 #         return render_template('error.html'), 500
 
 
-def greet_warehouse(wh_id):
-    """Функция приветствия склада с запросом товаров"""
-    print(f"Привет, склад {wh_id}! Запрашиваем список товаров...")
-
-    # Отправка запроса в Kafka
-    try:
-        producer2.send(
-            app.config['KAFKA_GOODS_REQUEST_TOPIC'],
-            {
-                'wh_id': wh_id,
-                'command': 'get_all_goods',
-                'timestamp': datetime.now(timezone.utc).isoformat()
-            }
-        )
-        producer2.flush()
-    except Exception as e:
-        app.logger.error(f"Ошибка отправки запроса товаров: {str(e)}")
+# def greet_warehouse(wh_id):
+#     """Функция приветствия склада с запросом товаров"""
+#     print(f"Привет, склад {wh_id}! Запрашиваем список товаров...")
+#
+#     # Отправка запроса в Kafka
+#     try:
+#         producer2.send(
+#             app.config['KAFKA_GOODS_REQUEST_TOPIC'],
+#             {
+#                 'wh_id': wh_id,
+#                 'command': 'get_all_goods',
+#                 'timestamp': datetime.now(timezone.utc).isoformat()
+#             }
+#         )
+#         producer2.flush()
+#     except Exception as e:
+#         app.logger.error(f"Ошибка отправки запроса товаров: {str(e)}")
 
 
 @app.route('/')
@@ -731,40 +731,14 @@ def index():
         section = request.args.get('section', 'products')
         selected_wh = request.args.get('warehouse', 'all')
 
-        #дополнительный товар
-        #greet_warehouse(selected_wh)
-        #print(f"DEBUF Requested goods for warehouse {selected_wh}")
-
-        # with app.goods_handler.lock:
-        #     warehouse_goods = app.goods_handler.get_goods(selected_wh)
-
-        warehouse_goods = app.goods_handler.get_goods(selected_wh)
-        print(f"Goods for {selected_wh}: {warehouse_goods}")
-
-        # Добавляем логирование
-
-        # with products_response.lock:
-        #     all_products = [p.copy() for p in products_response.products_cache] # May be without copy
-
         all_products = app.products_response.get_products()
 
-        print(f"defub | selected_wh: {selected_wh}")
-
-        with app.warehouse_state_invoice.lock:
-            var1 = app.warehouse_state_invoice.state_invoices
-        print(f"defub | state_invoices: { var1 }")
-        print("Invoices structure:", app.warehouse_state_invoice.get_state_invoice())
-        print(f"defub | all_products: { all_products }")
-        print(f"defub | get_goods: { warehouse_goods }")
         filtered_products = []
         if selected_wh != 'all':
 
-            #greet_warehouse(selected_wh)
-
             # Получаем товары склада из кэша
-            #warehouse_goods = goods_handler.get_goods(selected_wh)
-            #print(f"Goods for {selected_wh}: {warehouse_goods}")
-            #app.logger.info(f"Goods for {selected_wh}: {warehouse_goods}")
+            warehouse_goods = app.goods_handler.get_goods(selected_wh)
+            print(f"Goods for {selected_wh}: {warehouse_goods}")
 
             # Создаем словарь для быстрого поиска товаров
             goods_dict = {
@@ -777,24 +751,35 @@ def index():
                 product_id = str(product.get('id'))
                 if product_id in goods_dict:
                     product_copy = product.copy()
-                    product_copy['quantity'] = goods_dict[product_id]['quantity'] #goods_dict[product_id]['quantity']
+                    product_copy['quantity'] = goods_dict[product_id]['quantity']
                     filtered_products.append(product_copy)
         else:
             # Для "Всех складов" показываем все товары без количества
             filtered_products = all_products
 
-        warehouses_data = app.warehouse_online_mgr.get_warehouses() #(warehouse_online_mgr.act_wh.get_all())
-        print(f"defub | Warehouses data for template: {warehouses_data}")
+        warehouses_data = app.warehouse_online_mgr.get_warehouses()
+        invoices = app.warehouse_state_invoice.get_state_invoice()
 
-        # may be use context? as __main__
+        print(f"% defub | section: {section}")
+        print(f"% defub | selected_wh: {selected_wh}")
+        print(f"% defub | all Warehouses: {warehouses_data}")
+        print(f"% defub | all products: {all_products}")
+        print(f"% defub | filtered products (all or goods by WH): {filtered_products}")
+        print(f"% defub | invoices: {invoices}")
+
+        with app.goods_handler.lock:
+            print(f"% defub | full goods: {app.goods_handler.goods_cache}")
+
+        print(f"% defub | full2 goods: {app.goods_handler.get_goods('WHAAAAAARUS060ru00000002')}")
+
         return render_template(
             'index.html',
             section=section,
-            products=filtered_products,
-            allProducts=all_products,
-            warehouses=warehouses_data,
             selected_wh=selected_wh,
-            invoices=var1 #app.warehouse_state_invoice.get_state_invoice()  #warehouse_state_invoice.state_invoices
+            warehouses=warehouses_data,
+            allProducts=all_products,
+            products=filtered_products,
+            invoices=invoices
         )
     except Exception as e:
         app.logger.error(f"Index error: {str(e)}")
