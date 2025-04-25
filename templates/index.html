@@ -1,662 +1,614 @@
-<!--index.html-->
+<!-- index.html -->
 {% extends "base.html" %}
 
 {% block content %}
-<div class="section-content">
-    {% if section == 'products' %}
-        <h2 class="mb-4">Каталог товаров</h2>
-        <div class="row mb-4">
-        <div class="col-md-4">
+<div class="container mt-4">
+    {# Отображение flash сообщений #}
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="alert alert-{{ category or 'info' }} alert-dismissible fade show" role="alert">
+            {{ message }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+          </div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
 
-            <select class="form-select" id="warehouseFilter">
-    <option value="all">Все склады</option>
-    {% for wh in warehouses %}
-        <option value="{{ wh.wh_id }}" {% if wh.wh_id == selected_wh %}selected{% endif %}>
-            {{ wh.wh_id | wh_formatter }}
-        </option>
-    {% endfor %}
-</select>
-        </div>
-    </div>
+    {# Навигация по секциям (если нужно) #}
+    {#
+    <ul class="nav nav-tabs mb-3">
+        <li class="nav-item">
+            <a class="nav-link {% if section == 'products' %}active{% endif %}" href="{{ url_for('index', section='products', warehouse=selected_wh) }}">Товары</a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link {% if section == 'tasks' %}active{% endif %}" href="{{ url_for('index', section='tasks', warehouse=selected_wh) }}">Заявки</a>
+        </li>
+    </ul>
+    #}
 
-    <div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4">
-        {% if products %}
-            {% for product in products %}
-            <div class="col" data-product-id="{{ product.id }}">
-                <div class="card h-100 shadow-sm">
-    {% if product.photo_url %}
-    <img src="{{ product.photo_url }}"
-         class="card-img-top product-image"
-         alt="{{ product.name }}"
-         onerror="this.style.display='none'">
-    {% endif %}
-    <div class="card-body">
-        <h5 class="card-title">{{ product.name }}</h5>
-        <div class="d-flex justify-content-between align-items-center mb-2">
-            <span class="h4 text-primary">{{ "%.2f"|format(product.price) }} ₽</span>
-            {% if product.weight %}
-            <span class="badge bg-secondary">{{ product.weight }}</span>
-            {% endif %}
-        </div>
-        {% if product.quantity is defined %}
-        <div class="mt-2">
-            <span class="badge bg-success">
-                <i class="bi bi-box-seam me-1"></i>
-                На складе: {{ product.quantity }}
-            </span>
-        </div>
-        {% endif %}
-    </div>
-    <div class="card-footer bg-transparent">
-        <small class="text-muted">Артикул: #{{ product.id }}</small>
-    </div>
-</div>
-            </div>
-            {% endfor %}
-        {% else %}
-            <div class="col-12">
-                <div class="text-center py-5">
-                    <i class="bi bi-box-seam display-1 text-muted"></i>
-                    <h3 class="mt-3">Товары не найдены</h3>
-                    <p class="text-muted">Попробуйте обновить страницу позже</p>
+
+    <div class="section-content">
+        {% if section == 'products' %}
+            <h2 class="mb-4">Каталог товаров</h2>
+
+            {# Фильтр по складу для товаров #}
+            <div class="row mb-4">
+                <div class="col-md-6 col-lg-4">
+                    <label for="warehouseFilter" class="form-label">Фильтр по складу:</label>
+                    <select class="form-select" id="warehouseFilter">
+                        <option value="all" {% if selected_wh == 'all' %}selected{% endif %}>Все склады</option>
+                        {% for wh in warehouses %}
+                            <option value="{{ wh.wh_id }}" {% if wh.wh_id == selected_wh %}selected{% endif %}>
+                                {{ wh.wh_id | wh_formatter }}
+<!--                                {# Можно добавить метаданные склада, если они есть #}-->
+<!--                                {% if wh.metadata.location %} ({{ wh.metadata.location }}){% endif %}-->
+                            </option>
+                        {% endfor %}
+                    </select>
                 </div>
             </div>
-        {% endif %}
-    </div>
 
-    {% elif section == 'tasks' %}
-    <h2 class="mb-4">Управление накладными</h2>
-
-    <div class="mb-4">
-        <button type="button"
-                class="btn btn-primary"
-                data-bs-toggle="modal"
-                data-bs-target="#createInvoiceModal">
-            <i class="bi bi-file-earmark-plus me-2"></i>Создать накладную
-        </button>
-    </div>
-
-    <div>
-        <select id="warehouse-select-for-invoices">
-                    <option value="all">Выберите склад</option>
-
-                    {% for warehouse_id in invoices.keys() %}
-                        <option value="{{ warehouse_id }}">{{ warehouse_id }}</option>
-                    {% endfor %}
-        </select>
-    </div>
-
-
-    <div class="card border-0 shadow">
-        <div class="card-body p-0">
-            <div class="table-responsive">
-
-
-
-
-                <table class="table table-hover align-middle mb-0">
-    <thead class="bg-light">
-        <!-- Заголовки таблицы -->
-                        <tr>
-                            <th class="ps-4">Тип</th>
-                            <th>Отправитель</th>
-                            <th>Получатель</th>
-                            <th>Статус</th>
-                            <th>Товары | арт.(кол-во)</th>
-                            <th class="pe-4">Дата</th>
-                        </tr>
-    </thead>
-    <tbody id="invoicesTable" > <!-- class="ajax-loading" -->
-        <!-- Данные будут добавлены через JavaScript -->
-    </tbody>
-</table>
-
-
-            </div>
-        </div>
-    </div>
-
-    <!-- Модальное окно создания накладной -->
-    <div class="modal fade" id="createInvoiceModal" tabindex="-1" aria-labelledby="createInvoiceModalLabel" aria-hidden="true">
-        <div class="modal-dialog modal-lg">
-            <div class="modal-content">
-                <form method="POST" action="{{ url_for('create_invoice') }}" id="invoiceForm">
-                    <div class="modal-header">
-                        <h5 class="modal-title" id="createInvoiceModalLabel">
-                            <i class="bi bi-file-earmark-text me-2"></i>Новая накладная
-                        </h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                    </div>
-                    <div class="modal-body">
-                        <div class="row g-3">
-                            <div class="col-md-6">
-                                <label class="form-label required">Тип накладной</label>
-                                <select name="type" class="form-select" required>
-                                    <option value="" disabled selected>Выберите тип</option>
-                                    <option value="arrival">Приемка товара</option>
-                                    <option value="departure">Отгрузка товара</option>
-                                </select>
-                            </div>
-
-                            <div class="col-md-6">
-                                <label class="form-label required">Оперируемый склад</label>
-                                <select name="operated" class="form-select" required>
-                                    <option value="" disabled selected>Выберите склад</option>
-                                    {% for wh in warehouses %}
-                                    <option value="{{ wh.wh_id }}"
-                                            data-location="{{ wh.metadata.location | default('') }}">
-                                        {{ wh | wh_formatter }}
-                                        {% if wh.metadata.location %}
-                                        ({{ wh.metadata.location }})
-                                        {% endif %}
-                                    </option>
-                                    {% endfor %}
-                                </select>
-                            </div>
-
-                            <div class="col-12">
-                                <hr class="my-4">
-                                <div class="d-flex justify-content-between align-items-center mb-3">
-                                    <h6 class="mb-0">Товары в накладной</h6>
-                                    <button type="button" class="btn btn-sm btn-outline-primary" id="addItemBtnSUPER">
-                                        <i class="bi bi-plus-lg me-2"></i>Добавить товар
-                                    </button>
+            {# Отображение карточек товаров #}
+            <div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 row-cols-xl-4 g-4" id="productsGrid">
+                {% if products %}
+                    {% for product in products %}
+                    <div class="col" data-product-id="{{ product.id }}">
+                        <div class="card h-100 shadow-sm product-card">
+                            {% if product.photo_url %}
+                            <img src="{{ product.photo_url }}"
+                                 class="card-img-top product-image"
+                                 alt="{{ product.name }}"
+                                 onerror="this.onerror=null; this.src='/static/placeholder.png';"> {# Запасное изображение #}
+                            {% else %}
+                             {# <img src="/static/placeholder.png" class="card-img-top product-image" alt="Нет фото"> #}
+                             {# Или можно скрыть блок img если фото нет #}
+                            {% endif %}
+                            <div class="card-body d-flex flex-column">
+                                <h5 class="card-title flex-grow-1">{{ product.name }}</h5> {# Заголовок растягивается #}
+                                <div class="d-flex justify-content-between align-items-center mb-2 mt-auto"> {# Цена и вес внизу #}
+                                    <span class="h5 text-primary mb-0">{{ "%.2f"|format(product.price) }} ₽</span>
+                                    {% if product.weight %}
+                                    <span class="badge bg-secondary">{{ product.weight }}</span>
+                                    {% endif %}
                                 </div>
-
-                                <div id="itemsContainer">
-                                    <div class="item-row row g-2 mb-3">
-                                        <div class="col-6">
-                                            <select name="items[0][id]" class="form-select" required>
-                                                <option value="" disabled selected>Выберите товар</option>
-                                                {% for product in products %}
-                                                    <option value="{{ product.id }}">{{ product.name }}</option>
-                                                {% endfor %}
-                                            </select>
-                                        </div>
-                                        <div class="col-4">
-                                            <input type="number"
-                                                   name="items[0][quantity]"
-                                                   class="form-control"
-                                                   min="1"
-                                                   value="1"
-                                                   required
-                                                   placeholder="Количество">
-                                        </div>
-                                        <div class="col-2">
-                                            <button type="button" class="btn btn-danger btn-sm w-100 remove-item-btn">
-                                                <i class="bi bi-trash"></i>
-                                            </button>
-                                        </div>
-                                    </div>
+                                {# Отображение количества, если оно есть (т.е. выбран конкретный склад) #}
+                                {% if product.quantity is defined %}
+                                <div class="mt-2 text-end"> {# Выравниваем вправо #}
+                                    <span class="badge bg-success quantity-badge">
+                                        <i class="bi bi-box-seam me-1"></i>
+                                        На складе: {{ product.quantity }}
+                                    </span>
                                 </div>
+                                {% endif %}
+                            </div>
+                            <div class="card-footer bg-light">
+                                <small class="text-muted">Артикул: #{{ product.id }}</small>
                             </div>
                         </div>
                     </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
-                        <button type="submit" class="btn btn-primary">
-                            <i class="bi bi-save me-2"></i>Создать накладную
-                        </button>
+                    {% endfor %}
+                {% else %}
+                    {# Сообщение если товаров нет (либо вообще, либо на выбранном складе) #}
+                    <div class="col-12">
+                        <div class="text-center py-5 border rounded bg-light">
+                            <i class="bi bi-dropbox display-3 text-muted"></i>
+                            <h3 class="mt-3">Товары не найдены</h3>
+                            {% if selected_wh != 'all' %}
+                            <p class="text-muted">На складе <strong>{{ selected_wh | wh_formatter }}</strong> нет товаров или информация еще не поступила.</p>
+                            {% else %}
+                            <p class="text-muted">В каталоге нет товаров или информация еще не загружена.</p>
+                            {% endif %}
+                             <button class="btn btn-outline-primary mt-2" onclick="location.reload()">
+                                <i class="bi bi-arrow-clockwise me-1"></i> Обновить
+                            </button>
+                        </div>
                     </div>
-                </form>
+                {% endif %}
             </div>
-        </div>
-    </div>
-    {% endif %}
-</div>
+
+        {% elif section == 'tasks' %}
+            <h2 class="mb-4">Управление накладными</h2>
+
+            {# Кнопка создания накладной #}
+            <div class="mb-3 d-flex justify-content-between align-items-center">
+                <button type="button"
+                        class="btn btn-primary"
+                        data-bs-toggle="modal"
+                        data-bs-target="#createInvoiceModal">
+                    <i class="bi bi-file-earmark-plus me-2"></i>Создать накладную
+                </button>
+
+                {# Фильтр по складу для заявок #}
+                <div class="col-md-6 col-lg-4">
+                     <label for="warehouse-select-for-invoices" class="form-label">Фильтр заявок по складу:</label>
+                    <select class="form-select" id="warehouse-select-for-invoices">
+                        <option value="all" selected>Все склады</option>
+                        {# Заполняем склады из общего списка warehouses #}
+                        {% for wh in warehouses %}
+                            <option value="{{ wh.wh_id }}">
+                                {{ wh.wh_id | wh_formatter }}
+                                {% if wh.metadata.location %} ({{ wh.metadata.location }}){% endif %}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+
+
+            {# Таблица заявок #}
+            <div class="card border-0 shadow-sm">
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-hover table-striped align-middle mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th class="ps-4" style="width: 10%;">Тип</th>
+                                    <th style="width: 20%;">Отправитель</th>
+                                    <th style="width: 20%;">Получатель</th>
+                                    <th style="width: 10%;">Статус</th>
+                                    <th>Товары | арт.(кол-во)</th>
+                                    <th class="pe-4 text-end" style="width: 15%;">Дата создания</th>
+                                </tr>
+                            </thead>
+                            <tbody id="invoicesTable">
+                                <!-- Данные будут добавлены через JavaScript -->
+                                {# Предзагрузочное состояние #}
+                                <tr id="invoicesLoadingPlaceholder">
+                                     <td colspan="6" class="text-center p-5">
+                                        <div class="spinner-border text-primary" role="status">
+                                            <span class="visually-hidden">Загрузка...</span>
+                                        </div>
+                                        <p class="mt-2 mb-0 text-muted">Загрузка данных о накладных...</p>
+                                    </td>
+                                </tr>
+                                <tr id="invoicesEmptyPlaceholder" style="display: none;">
+                                     <td colspan="6" class="text-center p-5">
+                                        <i class="bi bi-journal-x display-4 text-muted"></i>
+                                        <p class="mt-2 mb-0 text-muted">Накладные не найдены для выбранного склада.</p>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Модальное окно создания накладной -->
+            <div class="modal fade" id="createInvoiceModal" tabindex="-1" aria-labelledby="createInvoiceModalLabel" aria-hidden="true">
+                <div class="modal-dialog modal-lg">
+                    <div class="modal-content">
+                        {# Указываем правильный action и method #}
+                        <form method="POST" action="{{ url_for('create_invoice') }}" id="invoiceForm">
+                            <div class="modal-header">
+                                <h5 class="modal-title" id="createInvoiceModalLabel">
+                                    <i class="bi bi-file-earmark-text me-2"></i>Новая накладная
+                                </h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+                            </div>
+                            <div class="modal-body">
+                                <div class="row g-3">
+                                    <div class="col-md-6">
+                                        <label for="invoiceType" class="form-label required">Тип накладной</label>
+                                        <select name="type" id="invoiceType" class="form-select" required>
+                                            <option value="" disabled selected>Выберите тип...</option>
+                                            <option value="arrival">Приемка товара</option>
+                                            <option value="departure">Отгрузка товара</option>
+                                        </select>
+                                    </div>
+
+                                    <div class="col-md-6">
+                                        <label for="operatedWarehouse" class="form-label required">Оперируемый склад</label>
+                                        <select name="operated" id="operatedWarehouse" class="form-select" required>
+                                            <option value="" disabled selected>Выберите склад...</option>
+                                            {# Используем warehouses для списка складов #}
+                                            {% for wh in warehouses %}
+                                            <option value="{{ wh.wh_id }}"
+                                                    data-location="{{ wh.metadata.location | default('') }}">
+                                                {{ wh.wh_id | wh_formatter }}
+                                                {% if wh.metadata.location %}
+                                                ({{ wh.metadata.location }})
+                                                {% endif %}
+                                            </option>
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+
+                                    <div class="col-12">
+                                        <hr class="my-4">
+                                        <div class="d-flex justify-content-between align-items-center mb-3">
+                                            <h6 class="mb-0">Товары в накладной</h6>
+                                            <button type="button" class="btn btn-sm btn-outline-success" id="addItemBtnSUPER">
+                                                <i class="bi bi-plus-lg me-1"></i>Добавить товар
+                                            </button>
+                                        </div>
+
+                                        <div id="itemsContainer">
+                                            {# Шаблон строки для товара (первая строка) #}
+                                            <div class="item-row row g-2 mb-2 align-items-center">
+                                                <div class="col-sm-6">
+                                                    <label class="form-label visually-hidden">Товар</label>
+                                                    <select name="items[0][id]" class="form-select product-select" required>
+                                                        <option value="" disabled selected>Выберите товар...</option>
+                                                        {# Используем allProducts для полного списка #}
+                                                        {% for product in allProducts %}
+                                                            <option value="{{ product.id }}">{{ product.name }} ({{ "%.2f"|format(product.price) }} ₽)</option>
+                                                        {% endfor %}
+                                                    </select>
+                                                </div>
+                                                <div class="col-sm-3">
+                                                    <label class="form-label visually-hidden">Количество</label>
+                                                    <input type="number"
+                                                           name="items[0][quantity]"
+                                                           class="form-control"
+                                                           min="1"
+                                                           value="1"
+                                                           required
+                                                           placeholder="Кол-во">
+                                                </div>
+                                                <div class="col-sm-auto"> {# Кнопка удаления #}
+                                                    <button type="button" class="btn btn-outline-danger btn-sm remove-item-btn" title="Удалить товар">
+                                                        <i class="bi bi-trash"></i>
+                                                    </button>
+                                                </div>
+                                            </div>
+                                             {# Конец шаблона строки #}
+                                        </div>
+                                        <small class="text-muted" id="itemCountStatus"></small>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="modal-footer justify-content-between">
+                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                                <button type="submit" class="btn btn-primary">
+                                    <i class="bi bi-save me-2"></i>Создать накладную
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+            {# Конец модального окна #}
+
+        {% endif %} {# Конец условия section == 'tasks' #}
+    </div> {# Конец .section-content #}
+</div> {# Конец .container #}
+
+{# Встраиваем JSON с данными о заявках для JavaScript #}
+<script>
+    // Безопасно вставляем данные из Flask в JavaScript
+    // Используем |tojson чтобы экранировать спецсимволы и создать валидный JSON
+    const allInvoiceStates = {{ invoice_states | tojson }};
+    const whFormatter = (whId) => {
+        if (!whId || typeof whId !== 'string' || whId.length !== 24) {
+            return whId;
+        }
+        try {
+            const parts = [
+                whId.substring(0, 2), whId.substring(2, 6), whId.substring(6, 8),
+                whId.substring(8, 11), whId.substring(11, 14), whId.substring(14, 16),
+                whId.substring(16, 20), whId.substring(20)
+            ];
+            return parts.join('-');
+        } catch (e) {
+            console.error("JS wh_formatter error:", e);
+            return whId;
+        }
+    };
+
+    const formatISODate = (isoString) => {
+        if (!isoString) return 'Нет данных';
+        try {
+            // Преобразуем ISO строку (предполагаем UTC из Python) в локальное время пользователя
+            const date = new Date(isoString);
+             // Проверяем валидность даты
+            if (isNaN(date.getTime())) {
+                return "Неверная дата";
+            }
+            // Форматируем в локальном формате ДД.ММ.ГГГГ ЧЧ:ММ
+            return date.toLocaleString('ru-RU', {
+                day: '2-digit',
+                month: '2-digit',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+             });
+        } catch (e) {
+            console.error("Error formatting date:", isoString, e);
+            return 'Ошибка даты';
+        }
+    };
+</script>
 
 <script>
+document.addEventListener('DOMContentLoaded', function() {
 
-    document.addEventListener('DOMContentLoaded', function() {
-    const warehouseSelector = document.getElementById('warehouse-selector');
-    if (warehouseSelector) {
-        warehouseSelector.addEventListener('change', function() {
+    // --- Логика для секции ТОВАРОВ ---
+    const warehouseFilter = document.getElementById('warehouseFilter');
+    if (warehouseFilter) {
+        warehouseFilter.addEventListener('change', function() {
             const selectedWh = this.value;
-            if (!selectedWh) return;
-
-            // Показать индикатор загрузки
-            const goodsContainer = document.getElementById('goods-container');
-            if (goodsContainer) {
-                goodsContainer.innerHTML = '<p>Загрузка товаров...</p>';
-            }
-
-            fetch(`/current_goods?wh_id=${selectedWh}`)
-                .then(response => {
-                    if (!response.ok) {
-                        throw new Error('Ошибка загрузки данных');
-                    }
-                    return response.json();
-                })
-                .then(data => {
-                    console.log('Получены данные:', data); // Для отладки
-                    updateGoodsDisplay(data.goods || []);
-                })
-                .catch(error => {
-                    console.error('Ошибка:', error);
-                    if (goodsContainer) {
-                        goodsContainer.innerHTML = '<p>Произошла ошибка при загрузке товаров</p>';
-                    }
-                });
-        });
-    }
-});
-
-//    document.addEventListener('DOMContentLoaded', function() {
-//    const warehouseFilter = document.getElementById('warehouseFilter');
-//    if (warehouseFilter) {
-//        warehouseFilter.addEventListener('change', async function() {
-//            const wh_id = this.value;
-//            if (wh_id !== 'all') {
-//                const checkInterval = setInterval(async () => {
-//                    const response = await fetch(`/current_goods?wh_id=${wh_id}`);
-//                    const data = await response.json();
-//                    if (data.goods.length > 0) {
-//                        clearInterval(checkInterval);
-//                        updateProductsDisplay(data.goods);
-//                    }
-//                }, 2000);
-//            } else {
-//                updateProductsDisplay(allProducts);
-//            }
-//        });
-//    }
-//});
-
-function updateGoodsDisplay(goods) {
-    const goodsContainer = document.getElementById('goods-container');
-    if (!goodsContainer) return;
-
-    if (!goods.length) {
-        goodsContainer.innerHTML = '<p>Нет товаров на складе</p>';
-        return;
-    }
-
-    let html = '<table class="table"><thead><tr><th>ID</th><th>Название</th><th>Количество</th><th>Описание</th></tr></thead><tbody>';
-
-    goods.forEach(item => {
-        html += `
-            <tr>
-                <td>${item.pgd_id}</td>
-                <td>${item.name || `Товар ${item.pgd_id}`}</td>
-                <td>${item.quantity}</td>
-                <td>${item.description || 'Нет описания'}</td>
-            </tr>`;
-    });
-
-    html += '</tbody></table>';
-    goodsContainer.innerHTML = html;
-}
-
-//function updateProductsDisplay(goodsData) {
-//    // Создаём карту {pgd_id: quantity} для быстрого поиска
-//    const goodsMap = {};
-//    goodsData.forEach(item => {
-//        goodsMap[item.pgd_id.toString()] = item.quantity; // Преобразуем в строку для совместимости
-//    });
-
-    // Итерируемся по всем товарам на странице
-    document.querySelectorAll('.col').forEach(col => {
-        const productCard = col.querySelector('.card');
-        const productId = productCard.dataset.productId;
-
-        if (productId) {
-            const quantity = goodsMap[productId];
-            if (quantity !== undefined) {
-                col.style.display = 'block';
-                // Добавляем информацию о количестве (если нужно)
-                const quantityElement = productCard.querySelector('.badge.bg-success');
-                if (quantityElement) {
-                    quantityElement.textContent = `На складе: ${quantity}`;
-                }
-            } else {
-                col.style.display = 'none';
-            }
-        } else {
-            col.style.display = 'none';
-        }
-    });
-};
-
-//    document.addEventListener('DOMContentLoaded', function() {
-//    const warehouseFilter = document.getElementById('warehouseFilter');
-//    if (warehouseFilter) {
-//        warehouseFilter.addEventListener('change', async function() {
-//
-//    const wh_id = this.value;
-//
-//    if (wh_id !== 'all') {
-//        // Запрашиваем товары для выбранного склада
-//        await fetch('/get_warehouse_goods', {
-//            method: 'POST',
-//            headers: {'Content-Type': 'application/json'},
-//            body: JSON.stringify({wh_id: wh_id})
-//        });
-//
-//        // Обновляем список товаров каждые 2 секунды пока не получим данные
-//        const checkInterval = setInterval(async () => {
-//            const response = await fetch(`/current_goods?wh_id=${wh_id}`);
-//            const data = await response.json();
-//
-//            if (data.goods.length > 0) {
-//                clearInterval(checkInterval);
-//                updateProductsDisplay(data.goods);
-//            }
-//        }, 2000);
-//    } else {
-//        // Показать все товары
-//        updateProductsDisplay(allProducts);
-//    }
-//    });
-
-//function updateProductsDisplay(goods_ids) {
-//    // Логика обновления отображения товаров
-//    document.querySelectorAll('.product-card').forEach(card => {
-//        const product_id = card.dataset.productId;
-//        card.style.display = goods_ids.includes(parseInt(product_id)) ? 'block' : 'none';
-//    });
-//}
-
-//function updateProductsDisplay(goodsIds) {
-//    const productIdSet = new Set(goodsIds); // Создаем Set для быстрого поиска
-//    document.querySelectorAll('.col').forEach(col => {
-//        const productCard = col.querySelector('.card');
-//        const productId = productCard.dataset.productId;
-//        if (productId && productIdSet.has(productId)) {
-//            col.style.display = 'block';
-//        } else {
-//            col.style.display = 'none';
-//        }
-//    });
-//};
-
-   // Invoice items management
-    document.addEventListener('DOMContentLoaded', function() {
-    const maxItems = 16;
-    const container = document.getElementById('itemsContainer');
-    const addButton = document.getElementById('addItemBtnSUPER');
-
-    if (!addButton) {
-        console.error('Кнопка addItemBtnSUPER не найдена!');
-        return;
-    }
-
-    // Добавление новой строки
-    addButton.addEventListener('click', function() {
-        const itemRows = container.getElementsByClassName('item-row');
-
-        console.log('Кнопка добавления нажата!', { currentItems: container.childElementCount, maxItems });
-
-        if (itemRows.length >= maxItems) return;
-
-        const newIndex = itemRows.length;
-        const template = itemRows[0].cloneNode(true);
-
-        // Обновление имен полей
-        template.querySelector('select').name = `items[${newIndex}][id]`;
-        template.querySelector('input').name = `items[${newIndex}][quantity]`;
-
-        // Сброс значений
-        template.querySelector('select').selectedIndex = 0;
-        template.querySelector('input').value = 1;
-
-        container.appendChild(template);
-        updateRemoveButtons();
-        toggleAddButton(itemRows.length + 1);
-    });
-
-    // Удаление строки
-    container.addEventListener('click', function(e) {
-        if (e.target.closest('.remove-item-btn')) {
-            const row = e.target.closest('.item-row');
-            if (container.childElementCount > 1) {
-                row.remove();
-                reindexItems();
-                toggleAddButton(container.childElementCount);
-            }
-        }
-    });
-
-    // Переиндексация оставшихся элементов
-    function reindexItems() {
-        Array.from(container.children).forEach((row, index) => {
-            row.querySelector('select').name = `items[${index}][id]`;
-            row.querySelector('input').name = `items[${index}][quantity]`;
+            // Перезагружаем страницу с новым параметром warehouse
+            // Сохраняем текущую секцию (products)
+            window.location.href = `/?section=products&warehouse=${selectedWh}`;
         });
     }
 
-    // Активация/деактивация кнопки добавления
-    function toggleAddButton(currentCount) {
-        addButton.disabled = currentCount >= maxItems;
-    }
+    // --- Логика для секции ЗАДАЧ ---
+    const warehouseSelectInvoices = document.getElementById('warehouse-select-for-invoices');
+    const invoicesTableBody = document.getElementById('invoicesTable');
+    const loadingPlaceholder = document.getElementById('invoicesLoadingPlaceholder');
+    const emptyPlaceholder = document.getElementById('invoicesEmptyPlaceholder');
 
-    // Обновление состояния кнопок удаления
-    function updateRemoveButtons() {
-        const rows = container.getElementsByClassName('item-row');
-        Array.from(rows).forEach(row => {
-            row.querySelector('.remove-item-btn').disabled = rows.length <= 1;
-        });
-    }
+    // Функция для отрисовки таблицы заявок
+    function renderInvoicesTable(invoices) {
+        if (!invoicesTableBody) return;
 
-    // Инициализация
-    updateRemoveButtons();
-    toggleAddButton(container.childElementCount);
+        invoicesTableBody.innerHTML = ''; // Очищаем таблицу
 
-
-    // Таблица заявок
-
-    // Добавляем обработчик для селектора склада
-    const warehouseSelect = document.getElementById('warehouse-select-for-invoices');
-    if (warehouseSelect) {
-        warehouseSelect.addEventListener('change', async function() {
-        const selectedWh = this.value;
-        if (!selectedWh) return;
-
-        const response = await fetch(`/get_invoices?warehouse_id=${selectedWh}`);
-        const data = await response.json();
-
-        // Исправленный селектор:
-        const tbody = document.getElementById('invoicesTable'); // Было: #invoicesTable tbody
-        if (!tbody) { // Проверка на существование элемента
-            console.error("Таблица invoicesTable не найдена!");
+        if (!invoices || invoices.length === 0) {
+            // Показываем заглушку "Нет данных"
+            if (emptyPlaceholder) emptyPlaceholder.style.display = 'table-row';
+            if (loadingPlaceholder) loadingPlaceholder.style.display = 'none';
             return;
         }
 
-        tbody.innerHTML = '';
+        // Скрываем заглушки
+        if (emptyPlaceholder) emptyPlaceholder.style.display = 'none';
+        if (loadingPlaceholder) loadingPlaceholder.style.display = 'none';
 
+        invoices.forEach(invoice => {
+            const statusClass = {
+                'completed': 'success',
+                'shipping': 'warning',
+                'processing': 'info',
+                'pending': 'secondary',
+                'rejected': 'danger'
+            }[invoice.status] || 'secondary'; // Класс для статуса
 
-            // Заполняем таблицу новыми данными
-            if (data && data.invoices) {
-                data.invoices.forEach(invoice => {
-                    const row = `
-                        <tr class="position-relative">
-                            <td class="ps-4 text-uppercase fw-bold">
-                                ${invoice.type.replace('_', ' ')}
-                            </td>
-                            <td>
-                                <span class="wh-id">${invoice.sender}</span>
-                            </td>
-                            <td>
-                                <span class="wh-id">${invoice.receiver}</span>
-                            </td>
-                            <td>
-                                <span class="badge rounded-pill bg-${
-                                    invoice.status === 'completed' ? 'success' :
-                                    invoice.status === 'shipping' ? 'warning' : 'danger'
-                                }">${invoice.status.toUpperCase()}</span>
-                            </td>
-                            <td>
-                                <div class="d-flex flex-wrap gap-2">
-                                    ${invoice.items.map(item =>
-                                        `<span class="badge bg-primary rounded-pill">${item.pgd_id} (x${item.quantity})</span>`
-                                    ).join('')}
-                                </div>
-                            </td>
-                            <td class="pe-4">${new Date(invoice.created_at).toLocaleString()}</td>
-                        </tr>
-                    `;
-                    tbody.insertAdjacentHTML('beforeend', row);
-                });
-            }
+            const itemsHtml = invoice.items && invoice.items.length > 0
+                ? invoice.items.map(item =>
+                    `<span class="badge bg-light text-dark border rounded-pill me-1 mb-1">
+                        #${item.pgd_id} <span class="fw-bold">(x${item.quantity})</span>
+                        ${item.batch ? `<i class="text-muted ms-1">(${item.batch})</i>` : ''}
+                     </span>`
+                  ).join('')
+                : '<span class="text-muted fst-italic">Нет товаров</span>'; // Если товаров нет
+
+            const row = `
+                <tr class="position-relative">
+                    <td class="ps-4 fw-medium">${invoice.type === 'arrival' ? 'Приемка' : invoice.type === 'departure' ? 'Отгрузка' : invoice.type}</td>
+                    <td><span class="wh-id" title="${invoice.sender}">${whFormatter(invoice.sender)}</span></td>
+                    <td><span class="wh-id" title="${invoice.receiver}">${whFormatter(invoice.receiver)}</span></td>
+                    <td><span class="badge rounded-pill bg-${statusClass} text-uppercase">${invoice.status}</span></td>
+                    <td><div class="d-flex flex-wrap gap-1">${itemsHtml}</div></td>
+                    <td class="pe-4 text-end text-nowrap">${formatISODate(invoice.created_at)}</td>
+                </tr>
+            `;
+            invoicesTableBody.insertAdjacentHTML('beforeend', row);
         });
     }
-});
 
+    // Обработчик изменения склада для заявок
+    if (warehouseSelectInvoices) {
+        warehouseSelectInvoices.addEventListener('change', function() {
+            const selectedWh = this.value;
+
+            // Показываем заглушку загрузки
+            if (loadingPlaceholder) loadingPlaceholder.style.display = 'table-row';
+            if (emptyPlaceholder) emptyPlaceholder.style.display = 'none';
+            invoicesTableBody.innerHTML = ''; // Очищаем перед "загрузкой"
+            // Имитируем задержку для визуального эффекта (можно убрать)
+            setTimeout(() => {
+                let filteredInvoices = [];
+                if (selectedWh === 'all') {
+                    // Собираем все инвойсы со всех складов
+                    allInvoiceStates.forEach(state => {
+                        if (state.invoices) {
+                             // Добавляем wh_id к каждому инвойсу для информации (если нужно)
+                             // state.invoices.forEach(inv => inv.source_wh_id = state.wh_id);
+                             filteredInvoices.push(...state.invoices);
+                        }
+                    });
+                     // Сортируем по дате создания (от новых к старым)
+                    filteredInvoices.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+                } else {
+                    // Ищем нужный склад в данных
+                    const warehouseState = allInvoiceStates.find(state => state.wh_id === selectedWh);
+                    if (warehouseState && warehouseState.invoices) {
+                        filteredInvoices = warehouseState.invoices;
+                         // Сортируем по дате создания
+                        filteredInvoices.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+                    }
+                }
+                 renderInvoicesTable(filteredInvoices);
+            }, 150); // Небольшая задержка
+
+        });
+
+         // Инициализация таблицы при загрузке страницы (показываем "Все склады")
+        if(document.querySelector("#tasks")){ // Выполняем только если мы в секции tasks
+             warehouseSelectInvoices.dispatchEvent(new Event('change'));
+        }
+    }
+
+
+    // --- Логика для модального окна СОЗДАНИЯ НАКЛАДНОЙ ---
+    const createInvoiceModal = document.getElementById('createInvoiceModal');
+    if (createInvoiceModal) {
+        const maxItems = 16;
+        const container = document.getElementById('itemsContainer');
+        const addButton = document.getElementById('addItemBtnSUPER');
+        const itemCountStatus = document.getElementById('itemCountStatus');
+
+        if (!container || !addButton || !itemCountStatus) {
+            console.error('Не найдены элементы для управления товарами в модальном окне!');
+            return;
+        }
+
+        // Обновление счетчика и состояния кнопок
+        function updateItemControls() {
+            const itemRows = container.getElementsByClassName('item-row');
+            const currentCount = itemRows.length;
+
+            // Обновляем текст счетчика
+            itemCountStatus.textContent = `Добавлено ${currentCount} из ${maxItems} позиций.`;
+
+            // Активация/деактивация кнопки добавления
+            addButton.disabled = currentCount >= maxItems;
+
+            // Обновление состояния кнопок удаления (удалить можно если > 1 строки)
+            Array.from(itemRows).forEach((row, index) => {
+                const removeBtn = row.querySelector('.remove-item-btn');
+                if(removeBtn) {
+                    removeBtn.disabled = currentCount <= 1;
+                }
+                 // Переиндексация имен полей
+                 row.querySelector('select[name^="items["]').name = `items[${index}][id]`;
+                 row.querySelector('input[name^="items["]').name = `items[${index}][quantity]`;
+            });
+        }
+
+
+        // Добавление новой строки
+        addButton.addEventListener('click', function() {
+            const itemRows = container.getElementsByClassName('item-row');
+            if (itemRows.length >= maxItems) return; // Уже максимум
+
+            const firstRow = itemRows[0];
+            if (!firstRow) return; // Нет шаблона для клонирования
+
+            const newRow = firstRow.cloneNode(true);
+
+            // Сброс значений в новой строке
+            newRow.querySelector('select').selectedIndex = 0; // Выбираем "Выберите товар..."
+            newRow.querySelector('input').value = 1;
+
+            container.appendChild(newRow);
+            updateItemControls(); // Обновляем счетчик и кнопки
+        });
+
+        // Удаление строки (делегирование события)
+        container.addEventListener('click', function(e) {
+            const removeButton = e.target.closest('.remove-item-btn');
+            if (removeButton) {
+                const rowToRemove = removeButton.closest('.item-row');
+                const itemRows = container.getElementsByClassName('item-row');
+
+                // Удаляем только если строк больше одной
+                if (rowToRemove && itemRows.length > 1) {
+                    rowToRemove.remove();
+                    updateItemControls(); // Обновляем счетчик, кнопки и индексы
+                }
+            }
+        });
+
+         // Инициализация при открытии модального окна (если нужно сбросить)
+        // createInvoiceModal.addEventListener('show.bs.modal', function () {
+            // // Можно сбросить форму к одной строке при каждом открытии
+            // const itemRows = container.getElementsByClassName('item-row');
+            // while(itemRows.length > 1) {
+            //     container.removeChild(itemRows[itemRows.length - 1]);
+            // }
+            // // Сброс первой строки
+            // if(itemRows[0]) {
+            //      itemRows[0].querySelector('select').selectedIndex = 0;
+            //      itemRows[0].querySelector('input').value = 1;
+            // }
+            // updateItemControls();
+        // });
+
+        // Первичная инициализация состояния кнопок и счетчика
+        updateItemControls();
+    }
+
+});
 </script>
 
 <style>
-
-    .ajax-loading {
-    position: relative;
+/* Улучшения стилей */
+.product-card {
+    transition: box-shadow 0.2s ease-in-out, transform 0.2s ease-in-out;
+    border: none; /* Убираем стандартную рамку */
 }
-.ajax-loading::after {
-    content: "";
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    width: 20px;
-    height: 20px;
-    border: 2px solid #f3f3f3;
-    border-top: 2px solid #3498db;
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
-}
-@keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
-}
-
-
-
-    .badge.bg-success {
-    font-size: 0.9em;
-    padding: 0.5em 0.75em;
-    display: inline-flex;
-    align-items: center;
-}
-
-.bi-box-seam {
-    margin-right: 0.3em;
-}
-
-.card-footer {
-    border-top: 1px solid rgba(0,0,0,.125);
-    background: #f8f9fa;
-}
-
-
-
-    .select2-container--bootstrap-5 .select2-results__option {
-    padding: 0.5rem 1rem;
-}
-
-.select2-container--bootstrap-5 .select2-results__option[aria-selected="true"] {
-    background-color: #e9ecef;
-}
-
-.warehouse-option {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
-.warehouse-meta {
-    font-size: 0.8em;
-    color: #6c757d;
-}
-
-
-
-.wh-id {
-    font-family: 'SFMono-Regular', Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-    font-size: 0.875em;
-    letter-spacing: 0.05em;
+.product-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.1) !important; /* Усиленная тень при наведении */
 }
 
 .product-image {
-    height: 200px;
-    object-fit: cover;
+    height: 200px; /* Фиксированная высота */
+    object-fit: contain; /* Масштабируем с сохранением пропорций, не обрезая */
     object-position: center;
-    border-bottom: 1px solid var(--bs-border-color);
+    background-color: #f8f9fa; /* Светлый фон для фото */
+    padding: 5px; /* Небольшой отступ */
+}
+.card-img-top {
+     border-top-left-radius: var(--bs-card-inner-border-radius);
+     border-top-right-radius: var(--bs-card-inner-border-radius);
+     border-bottom: 1px solid var(--bs-card-border-color); /* Тонкая линия снизу фото */
+}
+
+.quantity-badge {
+    font-size: 0.85em;
+    padding: 0.4em 0.6em;
+}
+
+.wh-id {
+    font-family: 'SFMono-Regular', Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-size: 0.9em; /* Чуть крупнее для читаемости */
+    /* letter-spacing: 0.05em; */ /* Можно убрать или уменьшить */
+    background-color: #e9ecef;
+    padding: 0.1em 0.4em;
+    border-radius: 0.2rem;
+    cursor: help; /* Подсказка что можно навести */
 }
 
 .table thead th {
     font-weight: 600;
-    text-transform: uppercase;
-    font-size: 0.8em;
-    letter-spacing: 0.05em;
+    /* text-transform: uppercase; */ /* Можно убрать для менее кричащего вида */
+    font-size: 0.85em;
+    /* letter-spacing: 0.05em; */
+    background-color: #f8f9fa; /* Явный фон заголовка */
+    vertical-align: middle;
 }
 
-.badge {
-    font-weight: 500;
+.table td {
+     vertical-align: middle;
 }
 
-.item-row {
-    transition: opacity 0.3s ease;
-}
-
-.item-row:hover {
-    background: rgba(0, 0, 0, 0.03);
-}
-
-.product-select[disabled] {
-    background-color: #f8f9fa;
-    opacity: 0.7;
-}
-
-.ajax-loading {
-    position: relative;
-    pointer-events: none;
-}
-
-.ajax-loading::after {
-    content: "";
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    width: 20px;
-    height: 20px;
-    border: 2px solid #f3f3f3;
-    border-top: 2px solid #3498db;
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-    0% { transform: translate(-50%, -50%) rotate(0deg); }
-    100% { transform: translate(-50%, -50%) rotate(360deg); }
-}
-
-.form-select[disabled] {
-    background-color: #e9ecef;
-    opacity: 1;
-}
-
+/* Стили для модального окна */
 .required::after {
     content: "*";
-    color: #dc3545;
+    color: var(--bs-danger);
     margin-left: 0.25rem;
 }
-
-.modal-content {
-    border-radius: 0.5rem;
-    box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
+.item-row .remove-item-btn {
+    width: 100%; /* Растягиваем кнопку удаления на всю ширину колонки */
 }
 
-.product-option {
-    display: flex;
-    justify-content: space-between;
-}
-
-
-@media (max-width: 768px) {
-    .product-image {
-        height: 150px;
-    }
-
-    .modal-dialog {
-        margin: 0.5rem;
+@media (max-width: 576px) {
+    .item-row .remove-item-btn {
+         margin-top: 0.5rem; /* Добавляем отступ сверху на малых экранах */
     }
 }
+
+
+/* Стили для Select2 (если будете использовать) */
+/*
+.select2-container--bootstrap-5 .select2-selection {
+    min-height: calc(1.5em + 0.75rem + 2px);
+    padding: 0.375rem 0.75rem;
+    font-size: 1rem;
+    font-weight: 400;
+    line-height: 1.5;
+}
+.select2-container--bootstrap-5 .select2-selection--single .select2-selection__arrow {
+    top: 50%;
+    transform: translateY(-50%);
+}
+*/
 
 </style>
+
 {% endblock %}
