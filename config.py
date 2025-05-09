@@ -2,6 +2,7 @@
 import os
 
 class Config:
+
     SECRET_KEY = os.environ.get('SECRET_KEY') or 'your-secret-key-here'
     SQLALCHEMY_DATABASE_URI = 'sqlite:///app.db'
     SQLALCHEMY_TRACK_MODIFICATIONS = False
@@ -18,4 +19,4 @@ class Config:
     KAFKA_GOODS_RESPONSE_TOPIC = 'warehouse_goods_response'
 
     KAFKA_STATE_INVOICE_TOPIC = 'warehouse_state_invoice'
-    WAREHOUSE_TIMEOUT_SEC = 20  # Таймаут активности склада
+    KAFKA_LOGISTIC_INVOICE_TOPIC = 'logistics_invoices'

@@ -1,7 +1,6 @@
 #app.py
 import sys
 import uuid
-from collections import defaultdict
 from datetime import datetime, timezone
 from json import JSONDecodeError
 
@@ -295,7 +294,6 @@ class WarehouseStateInvoice:
             app.logger.error(f"WSI Unexpected deserialization error: {str(e)}")
             app.logger.debug(f"Problematic raw message: {raw_message}")
             return None
-
 
     def update_state_invoice(self):
         for message in self.consumer:
@@ -775,37 +773,42 @@ def create_invoice():
                     continue
 
         if not invoice_type or not operated_wh_id or not items:
-            flash('Не все поля заполнены корректно или не добавлены товары.', 'danger')
+            #flash('Не все поля заполнены корректно или не добавлены товары.', 'danger')
             return redirect(url_for('index', section='tasks')) # Возвращаемся на страницу с задачами
 
-        # TODO: Здесь должна быть логика:
-        # 1. Определить sender и receiver на основе operated_wh_id и invoice_type
-        # 2. Сгенерировать уникальный invoice_id (если не генерируется дальше)
-        # 3. Сформировать сообщение для Kafka (KAFKA_INVOICE_COMMAND_TOPIC ?)
-        # 4. Отправить сообщение через KafkaProducer
+        # 'arrival' ? 'Приемка' : invoice.type === 'departure'
+        if invoice_type == 'arrival':
+            sender_wh = 'any'
+            receiver_wh = str(operated_wh_id)
+        elif invoice_type == 'departure':
+            sender_wh = str(operated_wh_id)
+            receiver_wh = 'any'
+        else:
+            raise NameError('Goodbye dude')
 
         # Пример сообщения (структура зависит от вашего контракта)
         kafka_message = {
-            'command_id': str(uuid.uuid4()), # Пример ID команды
+            'tag': str(uuid.uuid4()),
             'invoice_type': invoice_type,
-            'sender_warehouse': '...', # Определить логикой
-            'receiver_warehouse': '...', # Определить логикой
+            'sender_warehouse': sender_wh, # Определить логикой
+            'receiver_warehouse': receiver_wh, # Определить логикой
             'items': items,
             'timestamp': datetime.now(timezone.utc).isoformat()
         }
 
-        # try:
-        #     # producer2.send(Config.KAFKA_INVOICE_COMMAND_TOPIC, value=kafka_message)
-        #     # producer2.flush() # Дождаться отправки
-        #     app.logger.info(f"Запрос на создание накладной отправлен: {kafka_message}")
-        #     flash('Запрос на создание накладной отправлен.', 'success')
-        # except Exception as e:
-        #     app.logger.exception(f"Ошибка отправки запроса на создание накладной в Kafka: {e}")
-        #     flash('Ошибка при отправке запроса на создание накладной.', 'danger')
+        print(f"+& DEBUG KAFKA {kafka_message}")
+
+        try:
+            producer2.send(Config.KAFKA_LOGISTIC_INVOICE_TOPIC, value=kafka_message)
+            producer2.flush()
+            print(f"DEBUG KAFKA: Запрос на создание накладной отправлен: {kafka_message}")
+            flash('Запрос на создание накладной отправлен.', 'success')
+        except Exception as e:
+            app.logger.exception(f"Ошибка отправки запроса на создание накладной в Kafka: {e}")
+            flash('Ошибка при отправке запроса на создание накладной.', 'danger')
 
         # ПОКА ЧТО просто выводим сообщение об успехе (ЗАМЕНИТЬ НА ОТПРАВКУ В KAFKA)
-        flash(f'Запрос на {invoice_type} для склада {operated_wh_id} с {len(items)} товарами получен (требуется отправка в Kafka).', 'info')
-
+        # flash(f'Запрос на {invoice_type} для склада {operated_wh_id} с {len(items)} товарами получен (требуется отправка в Kafka).', 'info')
 
     except Exception as e:
         app.logger.exception(f"Ошибка при обработке формы создания накладной: {e}")
@@ -865,12 +868,6 @@ def get_warehouse_goods():
         return {'status': 'request_sent'}
     return {'status': 'error'}
 
-# @app.route('/current_goods')
-# @login_required
-# def current_goods():
-#     wh_id = request.args.get('wh_id')
-#     return {'goods': app.goods_handler.get_goods(wh_id)}
-
 # НЕ ИСПОЛЬЗУЕТСЯ
 @app.route('/current_goods')
 def current_goods():
@@ -900,7 +897,6 @@ def current_goods():
 
     return jsonify({'goods': enriched_goods})
 
-
 def create_admin():
     with app.app_context():
         if not User.query.filter_by(username='adm').first():
@@ -909,7 +905,6 @@ def create_admin():
             db.session.add(admin)
             db.session.commit()
             print("Admin user created!")
-
 
 def initialize_handlers(time = 120):
     if check_kafka_connection():
